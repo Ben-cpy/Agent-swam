@@ -6,16 +6,23 @@ import os
 
 # Fix Windows console encoding
 if sys.platform == 'win32':
-    import codecs
-    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
-    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+    try:
+        import codecs
+        if hasattr(sys.stdout, 'buffer'):
+            sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+        if hasattr(sys.stderr, 'buffer'):
+            sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+    except (AttributeError, TypeError):
+        pass
     os.environ['PYTHONIOENCODING'] = 'utf-8'
 
-# Move to backend directory
-os.chdir(os.path.join(os.path.dirname(__file__), 'backend'))
+# Get project root and add backend to path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+backend_path = os.path.join(project_root, 'backend')
+sys.path.insert(0, backend_path)
 
-# Add to path
-sys.path.insert(0, os.getcwd())
+# Change to backend directory for database operations
+os.chdir(backend_path)
 
 from config import settings
 from database import init_db, async_session_maker
@@ -64,8 +71,7 @@ async def test_startup():
     print('=' * 50)
     print()
     print(f'To start the server, run:')
-    print(f'  cd backend')
-    print(f'  ..\\venv\\Scripts\\python.exe main.py')
+    print(f'  ./scripts/start_server.sh')
     print()
     print(f'Server will be available at: http://{settings.api_host}:{settings.api_port}')
     return True
