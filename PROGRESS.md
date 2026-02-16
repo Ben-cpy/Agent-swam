@@ -15,3 +15,10 @@
 - Fix: Rewrote `README.md` to a minimal startup runbook, made `scripts/setup_env.sh` robust (auto Python discovery + non-interactive + ensurepip recovery), added `scripts/clean_workspace.sh` for one-command cleanup, and hardened `tests/verify_m1_fixes.py` DB reset retry for Windows file-lock timing.
 - Prevention: Keep startup docs focused on a single happy path, avoid hardcoded user paths, and prefer scripted cleanup over manual deletion.
 - Git Commit ID: e7a22bf
+
+## 2026-02-16 - Workspace Management (Local/SSH/Container) (Commit: 82c4448)
+- Problem: Users could not self-manage workspaces in UI, and backend only validated local paths, so SSH/container workspace registration was impossible.
+- Fix: Added `/workspaces` management page (create + list), introduced workspace types (`local`, `ssh`, `ssh_container`) with conditional fields, extended backend schemas/models/API validation and canonical path generation, and added SQLite-compatible schema migration for new columns.
+- Additional Fix: Resolved `/api/workspaces` 500 caused by enum storage mismatch by switching SQLAlchemy enum mapping to value-based persistence and normalizing legacy enum literals.
+- Prevention: Keep enum persistence strategy explicit (`values_callable`), and include startup migration checks when adding nullable columns in SQLite-backed environments.
+- Git Commit ID: 82c4448
