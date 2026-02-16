@@ -29,7 +29,7 @@ class TaskResponse(TaskBase):
     run_id: Optional[int] = None
 
     class Config:
-        from_attributes = True
+        orm_mode = True
 
 
 # Workspace Schemas
@@ -48,7 +48,7 @@ class WorkspaceResponse(WorkspaceBase):
     concurrency_limit: int
 
     class Config:
-        from_attributes = True
+        orm_mode = True
 
 
 # Runner Schemas
@@ -68,7 +68,7 @@ class RunnerResponse(RunnerBase):
     max_parallel: int
 
     class Config:
-        from_attributes = True
+        orm_mode = True
 
 
 # Run Schemas
@@ -97,7 +97,7 @@ class RunResponse(RunBase):
     error_class: Optional[ErrorClass] = None
 
     class Config:
-        from_attributes = True
+        orm_mode = True
 
 
 # Log Stream Event

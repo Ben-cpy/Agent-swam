@@ -1,0 +1,262 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { taskAPI, workspaceAPI } from '@/lib/api';
+import { BackendType, Workspace } from '@/lib/types';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+
+export default function TaskForm() {
+  const router = useRouter();
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [formData, setFormData] = useState({
+    title: '',
+    prompt: '',
+    workspace_id: '',
+    backend: BackendType.CLAUDE_CODE,
+  });
+
+  const [errors, setErrors] = useState({
+    title: '',
+    prompt: '',
+    workspace_id: '',
+  });
+
+  // Fetch workspaces on mount
+  useEffect(() => {
+    workspaceAPI.list()
+      .then((res) => {
+        setWorkspaces(res.data);
+        // Auto-select first workspace if available
+        if (res.data.length > 0) {
+          setFormData((prev) => ({
+            ...prev,
+            workspace_id: res.data[0].workspace_id.toString(),
+          }));
+        }
+      })
+      .catch((err) => {
+        setError('Failed to load workspaces');
+        console.error(err);
+      });
+  }, []);
+
+  const validate = () => {
+    const newErrors = {
+      title: '',
+      prompt: '',
+      workspace_id: '',
+    };
+
+    if (!formData.title.trim()) {
+      newErrors.title = 'Title is required';
+    } else if (formData.title.length > 500) {
+      newErrors.title = 'Title must be less than 500 characters';
+    }
+
+    if (!formData.prompt.trim()) {
+      newErrors.prompt = 'Prompt is required';
+    }
+
+    if (!formData.workspace_id) {
+      newErrors.workspace_id = 'Workspace is required';
+    }
+
+    setErrors(newErrors);
+    return !newErrors.title && !newErrors.prompt && !newErrors.workspace_id;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!validate()) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      await taskAPI.create({
+        title: formData.title,
+        prompt: formData.prompt,
+        workspace_id: parseInt(formData.workspace_id),
+        backend: formData.backend,
+      });
+
+      // Redirect to task board
+      router.push('/');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to create task');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (workspaces.length === 0 && !error) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center">
+          <p className="text-muted-foreground">
+            No workspaces available. Please register a workspace first.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Create New Task</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Error Alert */}
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+              {error}
+            </div>
+          )}
+
+          {/* Title */}
+          <div className="space-y-2">
+            <Label htmlFor="title">
+              Title <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="title"
+              value={formData.title}
+              onChange={(e) =>
+                setFormData({ ...formData, title: e.target.value })
+              }
+              placeholder="e.g., Fix authentication bug"
+              className={errors.title ? 'border-red-500' : ''}
+            />
+            {errors.title && (
+              <p className="text-sm text-red-500">{errors.title}</p>
+            )}
+          </div>
+
+          {/* Prompt */}
+          <div className="space-y-2">
+            <Label htmlFor="prompt">
+              Prompt <span className="text-red-500">*</span>
+            </Label>
+            <Textarea
+              id="prompt"
+              value={formData.prompt}
+              onChange={(e) =>
+                setFormData({ ...formData, prompt: e.target.value })
+              }
+              placeholder="Describe the task in detail..."
+              rows={6}
+              className={errors.prompt ? 'border-red-500' : ''}
+            />
+            {errors.prompt && (
+              <p className="text-sm text-red-500">{errors.prompt}</p>
+            )}
+          </div>
+
+          {/* Workspace */}
+          <div className="space-y-2">
+            <Label htmlFor="workspace">
+              Workspace <span className="text-red-500">*</span>
+            </Label>
+            <Select
+              value={formData.workspace_id}
+              onValueChange={(value) =>
+                setFormData({ ...formData, workspace_id: value })
+              }
+            >
+              <SelectTrigger className={errors.workspace_id ? 'border-red-500' : ''}>
+                <SelectValue placeholder="Select a workspace" />
+              </SelectTrigger>
+              <SelectContent>
+                {workspaces.map((ws) => (
+                  <SelectItem
+                    key={ws.workspace_id}
+                    value={ws.workspace_id.toString()}
+                  >
+                    {ws.display_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {errors.workspace_id && (
+              <p className="text-sm text-red-500">{errors.workspace_id}</p>
+            )}
+          </div>
+
+          {/* Backend */}
+          <div className="space-y-2">
+            <Label>Backend</Label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="backend"
+                  value={BackendType.CLAUDE_CODE}
+                  checked={formData.backend === BackendType.CLAUDE_CODE}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      backend: e.target.value as BackendType,
+                    })
+                  }
+                  className="w-4 h-4"
+                />
+                <span>Claude Code</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="backend"
+                  value={BackendType.CODEX_CLI}
+                  checked={formData.backend === BackendType.CODEX_CLI}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      backend: e.target.value as BackendType,
+                    })
+                  }
+                  className="w-4 h-4"
+                />
+                <span>Codex CLI</span>
+              </label>
+            </div>
+          </div>
+
+          {/* Submit Button */}
+          <div className="flex gap-3">
+            <Button type="submit" disabled={loading}>
+              {loading ? 'Creating...' : 'Create Task'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => router.push('/')}
+            >
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}

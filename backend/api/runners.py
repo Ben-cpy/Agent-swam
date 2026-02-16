@@ -15,4 +15,5 @@ async def list_runners(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Runner))
     runners = result.scalars().all()
 
-    return runners
+    # Convert to response models (Pydantic v1)
+    return [RunnerResponse.from_orm(runner) for runner in runners]
