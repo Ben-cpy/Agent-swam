@@ -37,7 +37,17 @@ async def _reset_database():
     await engine.dispose()
     db_file = BACKEND_PATH / "tasks.db"
     if db_file.exists():
-        db_file.unlink()
+        last_err = None
+        for _ in range(5):
+            try:
+                db_file.unlink()
+                last_err = None
+                break
+            except PermissionError as err:
+                last_err = err
+                await asyncio.sleep(0.5)
+        if last_err is not None:
+            raise last_err
     await init_db()
 
 

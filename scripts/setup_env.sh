@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # AI Task Manager - Environment Setup Script
-# Sets up Python 3.9.13 virtual environment
+# Sets up Python 3.9 virtual environment
 #
 
 set -e  # Exit on error
@@ -23,13 +23,31 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
 
-# Python executable path
-PYTHON_EXE="C:/Users/15225/AppData/Local/Programs/Python/Python39/python.exe"
+# Pick Python executable
+PYTHON_EXE="${PYTHON_EXE:-}"
+if [ -z "$PYTHON_EXE" ]; then
+    CANDIDATES=(
+        "/c/Users/$USERNAME/AppData/Local/Programs/Python/Python39/python.exe"
+        "$USERPROFILE/AppData/Local/Programs/Python/Python39/python.exe"
+        "python"
+    )
+    for candidate in "${CANDIDATES[@]}"; do
+        if [ "$candidate" = "python" ]; then
+            if command -v python >/dev/null 2>&1; then
+                PYTHON_EXE="python"
+                break
+            fi
+        elif [ -f "$candidate" ]; then
+            PYTHON_EXE="$candidate"
+            break
+        fi
+    done
+fi
 
-# Check if Python 3.9.13 exists
-if [ ! -f "$PYTHON_EXE" ]; then
-    echo -e "${RED}[ERROR]${NC} Python 3.9.13 not found at: $PYTHON_EXE"
-    echo "Please install Python 3.9.13 or update the path in this script"
+if [ -z "$PYTHON_EXE" ]; then
+    echo -e "${RED}[ERROR]${NC} Python not found."
+    echo "Set PYTHON_EXE and retry, e.g.:"
+    echo '  PYTHON_EXE="C:/Users/<YourUser>/AppData/Local/Programs/Python/Python39/python.exe" ./scripts/setup_env.sh'
     exit 1
 fi
 
@@ -39,15 +57,11 @@ echo
 
 # Check if venv already exists
 if [ -d "venv" ]; then
-    echo -e "${YELLOW}[WARN]${NC} Virtual environment already exists"
-    read -p "Do you want to recreate it? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if [ "${1:-}" = "--recreate" ]; then
         echo -e "${GREEN}[INFO]${NC} Removing existing virtual environment..."
         rm -rf venv
     else
         echo -e "${GREEN}[INFO]${NC} Keeping existing virtual environment"
-        # Skip to installation
     fi
 fi
 
@@ -65,8 +79,13 @@ fi
 
 # Install dependencies
 echo -e "${GREEN}[INFO]${NC} Installing dependencies..."
-./venv/Scripts/pip.exe install --upgrade pip
-./venv/Scripts/pip.exe install -r backend/requirements.txt
+if ! ./venv/Scripts/python.exe -m pip --version >/dev/null 2>&1; then
+    echo -e "${YELLOW}[WARN]${NC} pip module unavailable in venv, bootstrapping with ensurepip..."
+    ./venv/Scripts/python.exe -m ensurepip --upgrade
+fi
+
+./venv/Scripts/python.exe -m pip install --upgrade pip
+./venv/Scripts/python.exe -m pip install -r backend/requirements.txt
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}[ERROR]${NC} Failed to install dependencies"
@@ -81,5 +100,3 @@ echo
 echo "To start the server, run: ./scripts/start_server.sh"
 echo "Or manually: cd backend && ../venv/Scripts/python.exe main.py"
 echo
-
-read -p "Press any key to continue..."
