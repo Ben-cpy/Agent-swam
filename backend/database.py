@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import event
 from config import settings
 
 Base = declarative_base()
@@ -9,6 +10,11 @@ engine = create_async_engine(
     echo=settings.log_level == "DEBUG",
     future=True
 )
+
+if settings.database_url.startswith("sqlite"):
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, _connection_record):
+        dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
 async_session_maker = sessionmaker(
     engine,

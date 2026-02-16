@@ -1,21 +1,31 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
+import axios from 'axios';
 import { taskAPI } from '@/lib/api';
-import { Task, TaskStatus, BackendType } from '@/lib/types';
+import { ApiErrorBody, BackendType, TaskStatus } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import LogStream from '@/components/LogStream';
 import { formatDistanceToNow } from 'date-fns';
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (axios.isAxiosError<ApiErrorBody>(error)) {
+    return error.response?.data?.detail || error.message || fallback;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return fallback;
+}
+
 export default function TaskDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const taskId = parseInt(params.id as string);
-  const [task, setTask] = useState<Task | null>(null);
+  const taskId = parseInt(params.id as string, 10);
   const [actionLoading, setActionLoading] = useState(false);
 
   // Fetch task with auto-refresh every 3 seconds
@@ -27,12 +37,7 @@ export default function TaskDetailPage() {
       revalidateOnFocus: true,
     }
   );
-
-  useEffect(() => {
-    if (data?.data) {
-      setTask(data.data);
-    }
-  }, [data]);
+  const task = data?.data ?? null;
 
   const handleCancel = async () => {
     if (!confirm('Are you sure you want to cancel this task?')) {
@@ -43,8 +48,8 @@ export default function TaskDetailPage() {
     try {
       await taskAPI.cancel(taskId);
       mutate(); // Refresh task data
-    } catch (err: any) {
-      alert('Failed to cancel task: ' + (err.response?.data?.detail || err.message));
+    } catch (error: unknown) {
+      alert(`Failed to cancel task: ${getErrorMessage(error, 'Unknown error')}`);
     } finally {
       setActionLoading(false);
     }
@@ -57,26 +62,21 @@ export default function TaskDetailPage() {
       const newTaskId = response.data.id;
       // Redirect to the new task
       router.push(`/tasks/${newTaskId}`);
-    } catch (err: any) {
-      alert('Failed to retry task: ' + (err.response?.data?.detail || err.message));
+    } catch (error: unknown) {
+      alert(`Failed to retry task: ${getErrorMessage(error, 'Unknown error')}`);
       setActionLoading(false);
     }
   };
 
   const getStatusBadge = (status: TaskStatus) => {
-    const variants: Record<TaskStatus, { variant: any; className: string }> = {
-      [TaskStatus.TODO]: { variant: 'secondary', className: 'bg-slate-100' },
-      [TaskStatus.RUNNING]: { variant: 'default', className: 'bg-blue-500' },
-      [TaskStatus.DONE]: { variant: 'default', className: 'bg-green-500' },
-      [TaskStatus.FAILED]: { variant: 'destructive', className: 'bg-red-500' },
-      [TaskStatus.CANCELLED]: { variant: 'secondary', className: 'bg-gray-400' },
+    const classNames: Record<TaskStatus, string> = {
+      [TaskStatus.TODO]: 'bg-slate-100 text-slate-800',
+      [TaskStatus.RUNNING]: 'bg-blue-500 text-white',
+      [TaskStatus.DONE]: 'bg-green-500 text-white',
+      [TaskStatus.FAILED]: 'bg-red-500 text-white',
+      [TaskStatus.CANCELLED]: 'bg-gray-400 text-white',
     };
-    const config = variants[status];
-    return (
-      <Badge className={config.className}>
-        {status}
-      </Badge>
-    );
+    return <Badge className={classNames[status]}>{status}</Badge>;
   };
 
   const getBackendLabel = (backend: BackendType) => {
@@ -111,7 +111,7 @@ export default function TaskDetailPage() {
             {getStatusBadge(task.status)}
           </div>
           <p className="text-muted-foreground">
-            Task #{task.id} • Created{' '}
+            Task #{task.id} - Created{' '}
             {formatDistanceToNow(new Date(task.created_at), { addSuffix: true })}
           </p>
         </div>

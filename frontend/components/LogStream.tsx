@@ -89,9 +89,9 @@ export default function LogStream({ runId, initialLogs = '' }: LogStreamProps) {
           if (res.data.log_blob) {
             setLogs(res.data.log_blob.split('\n').filter(Boolean));
           }
-          if (res.data.exit_code !== null) {
+          if (res.data.exit_code != null) {
             setIsComplete(true);
-            setExitCode(res.data.exit_code);
+            setExitCode(res.data.exit_code ?? null);
           }
         })
         .catch((err) => {

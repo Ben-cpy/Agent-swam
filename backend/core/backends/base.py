@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, Dict, Any, Optional, List, Tuple
+from typing import AsyncIterator, Optional, List, Tuple, Callable, Awaitable, Union
 import asyncio
 
 
@@ -15,7 +15,11 @@ class BackendAdapter(ABC):
         pass
 
     @abstractmethod
-    async def execute(self, prompt: str) -> AsyncIterator[str]:
+    async def execute(
+        self,
+        prompt: str,
+        should_terminate: Optional[Callable[[], Union[bool, Awaitable[bool]]]] = None,
+    ) -> AsyncIterator[str]:
         """
         Execute the prompt and yield log lines as they arrive.
 
@@ -34,7 +38,12 @@ class BackendAdapter(ABC):
         """
         pass
 
-    async def run_subprocess(self, cmd: List[str]) -> AsyncIterator[Tuple[str, int]]:
+    async def run_subprocess(
+        self,
+        cmd: List[str],
+        env: Optional[dict] = None,
+        should_terminate: Optional[Callable[[], Union[bool, Awaitable[bool]]]] = None,
+    ) -> AsyncIterator[Tuple[str, int]]:
         """
         Common subprocess runner that yields log lines and final exit code.
 
@@ -45,14 +54,42 @@ class BackendAdapter(ABC):
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            cwd=self.workspace_path
+            cwd=self.workspace_path,
+            env=env,
         )
 
-        # Stream output lines
+        async def _should_terminate() -> bool:
+            if should_terminate is None:
+                return False
+            result = should_terminate()
+            if asyncio.iscoroutine(result):
+                result = await result
+            return bool(result)
+
+        # Stream output lines with periodic cancellation checks
         while True:
-            line = await process.stdout.readline()
+            if await _should_terminate():
+                if process.returncode is None:
+                    process.terminate()
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=3)
+                    except asyncio.TimeoutError:
+                        process.kill()
+                        await process.wait()
+                yield ("", 130)
+                return
+
+            try:
+                line = await asyncio.wait_for(process.stdout.readline(), timeout=0.5)
+            except asyncio.TimeoutError:
+                if process.returncode is not None:
+                    break
+                continue
+
             if not line:
-                break
+                if process.returncode is not None:
+                    break
+                continue
             yield (line.decode('utf-8', errors='replace'), 0)
 
         # Wait for process to complete

@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 from database import get_db
-from models import Workspace
+from models import Workspace, Runner
 from schemas import WorkspaceCreate, WorkspaceResponse
 import os
 
@@ -28,6 +28,13 @@ async def create_workspace(
 
     if existing:
         raise HTTPException(status_code=400, detail="Workspace with this path already exists")
+
+    runner_result = await db.execute(
+        select(Runner).where(Runner.runner_id == workspace.runner_id)
+    )
+    runner = runner_result.scalar_one_or_none()
+    if not runner:
+        raise HTTPException(status_code=400, detail="Runner not found")
 
     new_workspace = Workspace(
         path=workspace.path,

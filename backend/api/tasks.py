@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
-from database import get_db
-from models import Task, TaskStatus
-from schemas import TaskCreate, TaskResponse, TaskUpdate
+from database import get_db, async_session_maker
+from models import Task, TaskStatus, Workspace
+from schemas import TaskCreate, TaskResponse
 from core.executor import TaskExecutor
 from datetime import datetime
 
@@ -17,6 +17,13 @@ async def create_task(
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new task"""
+    workspace_result = await db.execute(
+        select(Workspace).where(Workspace.workspace_id == task.workspace_id)
+    )
+    workspace = workspace_result.scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=400, detail="Workspace not found")
+
     new_task = Task(
         title=task.title,
         prompt=task.prompt,
@@ -76,8 +83,8 @@ async def cancel_task(
     db: AsyncSession = Depends(get_db)
 ):
     """Cancel a task"""
-    executor = TaskExecutor(db)
-    success = await executor.cancel_task(task_id)
+    executor = TaskExecutor(async_session_maker)
+    success = await executor.cancel_task(task_id, db=db)
 
     if not success:
         raise HTTPException(status_code=400, detail="Cannot cancel task")

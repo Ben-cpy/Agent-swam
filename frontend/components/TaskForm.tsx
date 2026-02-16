@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import axios from 'axios';
 import { taskAPI, workspaceAPI } from '@/lib/api';
-import { BackendType, Workspace } from '@/lib/types';
+import { ApiErrorBody, BackendType, Workspace } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -100,9 +101,15 @@ export default function TaskForm() {
 
       // Redirect to task board
       router.push('/');
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to create task');
-      console.error(err);
+    } catch (error: unknown) {
+      if (axios.isAxiosError<ApiErrorBody>(error)) {
+        setError(error.response?.data?.detail || error.message || 'Failed to create task');
+      } else if (error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError('Failed to create task');
+      }
+      console.error(error);
     } finally {
       setLoading(false);
     }

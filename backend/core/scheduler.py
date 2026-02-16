@@ -141,8 +141,8 @@ class TaskScheduler:
             return False
 
         # All checks passed, dispatch task
-        executor = TaskExecutor(db)
-        success = await executor.execute_task(task.id)
+        executor = TaskExecutor(self.db_session_maker)
+        success = await executor.execute_task(task.id, db=db)
 
         return success
 

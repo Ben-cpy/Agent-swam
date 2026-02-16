@@ -1,4 +1,4 @@
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Optional, Callable, Awaitable, Union
 from .base import BackendAdapter
 import os
 
@@ -23,7 +23,11 @@ class ClaudeCodeAdapter(BackendAdapter):
             prompt
         ]
 
-    async def execute(self, prompt: str) -> AsyncIterator[str]:
+    async def execute(
+        self,
+        prompt: str,
+        should_terminate: Optional[Callable[[], Union[bool, Awaitable[bool]]]] = None,
+    ) -> AsyncIterator[str]:
         """
         Execute Claude Code and yield log lines.
 
@@ -39,12 +43,10 @@ class ClaudeCodeAdapter(BackendAdapter):
         if "CLAUDECODE" in env:
             del env["CLAUDECODE"]
 
-        log_lines = []
         exit_code = 0
 
-        async for line, code in self.run_subprocess_with_env(cmd, env):
+        async for line, code in self.run_subprocess(cmd, env=env, should_terminate=should_terminate):
             if line:
-                log_lines.append(line)
                 yield line
             if code != 0:
                 exit_code = code
@@ -52,42 +54,19 @@ class ClaudeCodeAdapter(BackendAdapter):
         # Yield exit code info
         yield f"\n[Process exited with code {exit_code}]\n"
 
-    async def run_subprocess_with_env(self, cmd: list[str], env: dict) -> AsyncIterator[tuple[str, int]]:
-        """Run subprocess with custom environment"""
-        import asyncio
-
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=self.workspace_path,
-            env=env
-        )
-
-        # Stream output lines
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
-            yield (line.decode('utf-8', errors='replace'), 0)
-
-        # Wait for process to complete
-        exit_code = await process.wait()
-        yield ("", exit_code)
-
     def parse_exit_code(self, return_code: int) -> tuple[bool, Optional[str]]:
         """
         Parse exit code from Claude Code.
 
         0 = success
         1 = general error (could be CODE, TOOL, or UNKNOWN)
-        130 = user interrupt (SIGINT)
+        130 = user interrupt (SIGINT), mapped by executor to CANCELLED status
         Other = network or system error
         """
         if return_code == 0:
             return (True, None)
         elif return_code == 130:
-            return (False, "CANCELLED")
+            return (False, None)
         elif return_code == 1:
             # Need to analyze logs to determine exact error class
             # For M1, default to TOOL

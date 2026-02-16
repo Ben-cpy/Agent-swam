@@ -1,4 +1,4 @@
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Optional, Callable, Awaitable, Union
 from .base import BackendAdapter
 import json
 
@@ -22,7 +22,11 @@ class CodexAdapter(BackendAdapter):
             prompt
         ]
 
-    async def execute(self, prompt: str) -> AsyncIterator[str]:
+    async def execute(
+        self,
+        prompt: str,
+        should_terminate: Optional[Callable[[], Union[bool, Awaitable[bool]]]] = None,
+    ) -> AsyncIterator[str]:
         """
         Execute Codex CLI and yield log lines.
 
@@ -34,15 +38,13 @@ class CodexAdapter(BackendAdapter):
         """
         cmd = self.build_command(prompt)
 
-        log_lines = []
         exit_code = 0
 
-        async for line, code in self.run_subprocess(cmd):
+        async for line, code in self.run_subprocess(cmd, should_terminate=should_terminate):
             if line.strip():
                 # Try to parse JSONL and extract readable content
                 formatted_line = self._format_jsonl_line(line)
                 if formatted_line:
-                    log_lines.append(formatted_line)
                     yield formatted_line
             if code != 0:
                 exit_code = code
@@ -87,13 +89,13 @@ class CodexAdapter(BackendAdapter):
 
         0 = success
         1 = general error
-        130 = user interrupt
+        130 = user interrupt, mapped by executor to CANCELLED status
         Other = system error
         """
         if return_code == 0:
             return (True, None)
         elif return_code == 130:
-            return (False, "CANCELLED")
+            return (False, None)
         elif return_code == 1:
             # Default to CODE error for M1
             return (False, "CODE")

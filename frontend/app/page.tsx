@@ -1,16 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import { taskAPI } from '@/lib/api';
-import { Task } from '@/lib/types';
 import TaskBoard from '@/components/TaskBoard';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 
 export default function Home() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-
   // Fetch tasks with SWR auto-refresh every 3 seconds
   const { data, error, isLoading } = useSWR(
     '/tasks',
@@ -20,12 +16,7 @@ export default function Home() {
       revalidateOnFocus: true,
     }
   );
-
-  useEffect(() => {
-    if (data?.data) {
-      setTasks(data.data);
-    }
-  }, [data]);
+  const tasks = data?.data ?? [];
 
   if (error) {
     return (

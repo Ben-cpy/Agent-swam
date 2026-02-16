@@ -1,14 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import { runnerAPI } from '@/lib/api';
-import { Runner } from '@/lib/types';
 import RunnerCard from '@/components/RunnerCard';
 
 export default function RunnersPage() {
-  const [runners, setRunners] = useState<Runner[]>([]);
-
   // Fetch runners with SWR auto-refresh every 10 seconds
   const { data, error, isLoading } = useSWR(
     '/runners',
@@ -18,12 +14,7 @@ export default function RunnersPage() {
       revalidateOnFocus: true,
     }
   );
-
-  useEffect(() => {
-    if (data?.data) {
-      setRunners(data.data);
-    }
-  }, [data]);
+  const runners = data?.data ?? [];
 
   if (error) {
     return (
