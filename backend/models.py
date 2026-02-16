@@ -23,6 +23,12 @@ class RunnerStatus(str, enum.Enum):
     OFFLINE = "OFFLINE"
 
 
+class WorkspaceType(str, enum.Enum):
+    LOCAL = "local"
+    SSH = "ssh"
+    SSH_CONTAINER = "ssh_container"
+
+
 class ErrorClass(str, enum.Enum):
     CODE = "CODE"
     TOOL = "TOOL"
@@ -57,6 +63,19 @@ class Workspace(Base):
     workspace_id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     path = Column(String(1000), nullable=False, unique=True)
     display_name = Column(String(200), nullable=False)
+    workspace_type = Column(
+        SQLEnum(
+            WorkspaceType,
+            values_callable=lambda enum_cls: [enum_item.value for enum_item in enum_cls],
+            name="workspace_type_enum",
+        ),
+        default=WorkspaceType.LOCAL,
+        nullable=False,
+    )
+    host = Column(String(255), nullable=True)
+    port = Column(Integer, nullable=True)
+    ssh_user = Column(String(100), nullable=True)
+    container_name = Column(String(200), nullable=True)
     runner_id = Column(Integer, ForeignKey("runners.runner_id"), nullable=False)
     concurrency_limit = Column(Integer, default=1, nullable=False)  # M1: fixed to 1
 

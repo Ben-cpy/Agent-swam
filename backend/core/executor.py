@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from models import Task, Workspace, Runner, Run, TaskStatus, ErrorClass
+from models import Task, Workspace, Runner, Run, TaskStatus, ErrorClass, WorkspaceType
 from core.backends import ClaudeCodeAdapter, CodexAdapter
 from datetime import datetime
 import asyncio
@@ -54,6 +54,17 @@ class TaskExecutor:
 
         if not workspace:
             logger.error(f"Workspace {task.workspace_id} not found")
+            return False
+
+        if workspace.workspace_type != WorkspaceType.LOCAL:
+            task.status = TaskStatus.FAILED
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            logger.error(
+                "Workspace %s type %s is not executable yet (only local supported in current runner)",
+                workspace.workspace_id,
+                workspace.workspace_type.value,
+            )
             return False
 
         # Fetch runner

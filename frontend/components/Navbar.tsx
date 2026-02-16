@@ -9,6 +9,7 @@ export default function Navbar() {
   const navLinks = [
     { href: '/', label: 'Task Board' },
     { href: '/tasks/new', label: 'New Task' },
+    { href: '/workspaces', label: 'Workspaces' },
     { href: '/runners', label: 'Runners' },
   ];
 

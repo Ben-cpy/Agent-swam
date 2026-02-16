@@ -3,11 +3,41 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 from database import get_db
-from models import Workspace, Runner
+from models import Workspace, Runner, WorkspaceType
 from schemas import WorkspaceCreate, WorkspaceResponse
 import os
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
+
+
+def _build_canonical_path(workspace: WorkspaceCreate) -> str:
+    if workspace.workspace_type == WorkspaceType.LOCAL:
+        return os.path.abspath(os.path.normpath(workspace.path))
+
+    if workspace.workspace_type == WorkspaceType.SSH:
+        user_part = f"{workspace.ssh_user}@" if workspace.ssh_user else ""
+        port = workspace.port or 22
+        return f"ssh://{user_part}{workspace.host}:{port}{workspace.path}"
+
+    user_part = f"{workspace.ssh_user}@" if workspace.ssh_user else ""
+    port = workspace.port or 22
+    return (
+        f"ssh://{user_part}{workspace.host}:{port}"
+        f"/container/{workspace.container_name}:{workspace.path}"
+    )
+
+
+def _validate_workspace_input(workspace: WorkspaceCreate):
+    if workspace.workspace_type == WorkspaceType.LOCAL:
+        if not os.path.exists(workspace.path):
+            raise HTTPException(status_code=400, detail="Local workspace path does not exist")
+        return
+
+    if not workspace.host:
+        raise HTTPException(status_code=400, detail="Host is required for SSH workspace")
+
+    if workspace.workspace_type == WorkspaceType.SSH_CONTAINER and not workspace.container_name:
+        raise HTTPException(status_code=400, detail="Container name is required for SSH container workspace")
 
 
 @router.post("", response_model=WorkspaceResponse, status_code=201)
@@ -16,13 +46,12 @@ async def create_workspace(
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new workspace"""
-    # Validate path exists
-    if not os.path.exists(workspace.path):
-        raise HTTPException(status_code=400, detail="Workspace path does not exist")
+    _validate_workspace_input(workspace)
+    canonical_path = _build_canonical_path(workspace)
 
     # Check if path already exists
     result = await db.execute(
-        select(Workspace).where(Workspace.path == workspace.path)
+        select(Workspace).where(Workspace.path == canonical_path)
     )
     existing = result.scalar_one_or_none()
 
@@ -37,8 +66,13 @@ async def create_workspace(
         raise HTTPException(status_code=400, detail="Runner not found")
 
     new_workspace = Workspace(
-        path=workspace.path,
+        path=canonical_path,
         display_name=workspace.display_name,
+        workspace_type=workspace.workspace_type,
+        host=workspace.host,
+        port=workspace.port,
+        ssh_user=workspace.ssh_user,
+        container_name=workspace.container_name,
         runner_id=workspace.runner_id,
         concurrency_limit=1  # M1: fixed to 1
     )

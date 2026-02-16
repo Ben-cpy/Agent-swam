@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, List
-from models import TaskStatus, BackendType, RunnerStatus, ErrorClass
+from models import TaskStatus, BackendType, RunnerStatus, ErrorClass, WorkspaceType
 
 
 # Task Schemas
@@ -36,6 +36,11 @@ class TaskResponse(TaskBase):
 class WorkspaceBase(BaseModel):
     path: str = Field(..., max_length=1000)
     display_name: str = Field(..., max_length=200)
+    workspace_type: WorkspaceType = WorkspaceType.LOCAL
+    host: Optional[str] = Field(None, max_length=255)
+    port: Optional[int] = Field(22, ge=1, le=65535)
+    ssh_user: Optional[str] = Field(None, max_length=100)
+    container_name: Optional[str] = Field(None, max_length=200)
 
 
 class WorkspaceCreate(WorkspaceBase):

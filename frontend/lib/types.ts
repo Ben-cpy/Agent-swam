@@ -11,6 +11,12 @@ export enum BackendType {
   CODEX_CLI = 'codex_cli',
 }
 
+export enum WorkspaceType {
+  LOCAL = 'local',
+  SSH = 'ssh',
+  SSH_CONTAINER = 'ssh_container',
+}
+
 export interface Task {
   id: number;
   title: string;
@@ -34,6 +40,11 @@ export interface Workspace {
   workspace_id: number;
   path: string;
   display_name: string;
+  workspace_type: WorkspaceType;
+  host?: string | null;
+  port?: number | null;
+  ssh_user?: string | null;
+  container_name?: string | null;
   runner_id: number;
   concurrency_limit: number;
 }
@@ -50,6 +61,11 @@ export interface Runner {
 export interface WorkspaceCreateInput {
   path: string;
   display_name: string;
+  workspace_type: WorkspaceType;
+  host?: string;
+  port?: number;
+  ssh_user?: string;
+  container_name?: string;
   runner_id: number;
 }
 

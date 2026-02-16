@@ -119,9 +119,12 @@ export default function TaskForm() {
     return (
       <Card>
         <CardContent className="py-12 text-center">
-          <p className="text-muted-foreground">
+          <p className="text-muted-foreground mb-4">
             No workspaces available. Please register a workspace first.
           </p>
+          <Button type="button" onClick={() => router.push('/workspaces')}>
+            Go To Workspace Management
+          </Button>
         </CardContent>
       </Card>
     );
