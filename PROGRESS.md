@@ -22,3 +22,9 @@
 - Additional Fix: Resolved `/api/workspaces` 500 caused by enum storage mismatch by switching SQLAlchemy enum mapping to value-based persistence and normalizing legacy enum literals.
 - Prevention: Keep enum persistence strategy explicit (`values_callable`), and include startup migration checks when adding nullable columns in SQLite-backed environments.
 - Git Commit ID: 82c4448
+
+## 2026-02-16 - Codex WinError2 + Task Delete Flow (Commit: 269a09e)
+- Problem: Local tasks using Codex failed with `Internal error: [WinError 2]` on Windows because subprocess execution could not resolve PowerShell command aliases (`codex`/`claude`) reliably; task deletion was also missing.
+- Fix: Added explicit cross-platform CLI resolver and switched adapters to execute real binaries (`codex.cmd` / `claude.cmd` on Windows), added clearer CLI-not-found handling, and implemented task delete API + frontend delete button in task detail page.
+- Prevention: Never rely on shell aliases for subprocess execution in Python on Windows; always resolve concrete executable path first.
+- Git Commit ID: 269a09e
