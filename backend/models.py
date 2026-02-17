@@ -10,6 +10,7 @@ class TaskStatus(str, enum.Enum):
     RUNNING = "RUNNING"
     DONE = "DONE"
     FAILED = "FAILED"
+    FAILED_QUOTA = "FAILED_QUOTA"
     CANCELLED = "CANCELLED"
 
 
@@ -33,6 +34,13 @@ class ErrorClass(str, enum.Enum):
     CODE = "CODE"
     TOOL = "TOOL"
     NETWORK = "NETWORK"
+    QUOTA = "QUOTA"
+    UNKNOWN = "UNKNOWN"
+
+
+class QuotaStateValue(str, enum.Enum):
+    OK = "OK"
+    QUOTA_EXHAUSTED = "QUOTA_EXHAUSTED"
     UNKNOWN = "UNKNOWN"
 
 
@@ -111,7 +119,27 @@ class Run(Base):
     exit_code = Column(Integer, nullable=True)
     error_class = Column(SQLEnum(ErrorClass), nullable=True)
     log_blob = Column(Text, nullable=True)  # M1: store as text
+    usage_json = Column(Text, nullable=True)  # M3: usage metrics JSON
 
     # Relationships
     task = relationship("Task", back_populates="runs", foreign_keys=[task_id])
     runner = relationship("Runner", back_populates="runs")
+
+
+class QuotaState(Base):
+    __tablename__ = "quota_states"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    provider = Column(String(50), nullable=False)  # "claude" or "openai"
+    account_label = Column(String(100), nullable=False, default="default")
+    state = Column(
+        SQLEnum(
+            QuotaStateValue,
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+            name="quota_state_enum",
+        ),
+        default=QuotaStateValue.OK,
+        nullable=False,
+    )
+    last_event_at = Column(DateTime, nullable=True)
+    note = Column(Text, nullable=True)

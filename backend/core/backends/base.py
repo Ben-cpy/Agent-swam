@@ -8,6 +8,18 @@ class BackendAdapter(ABC):
 
     def __init__(self, workspace_path: str):
         self.workspace_path = workspace_path
+        self._usage_data: Optional[dict] = None
+        self._is_quota_error: bool = False
+
+    @property
+    def usage_data(self) -> Optional[dict]:
+        """Usage metrics extracted during execution, if available."""
+        return self._usage_data
+
+    @property
+    def is_quota_error(self) -> bool:
+        """Whether a quota/rate-limit error was detected during execution."""
+        return self._is_quota_error
 
     @abstractmethod
     def build_command(self, prompt: str) -> List[str]:

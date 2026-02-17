@@ -11,6 +11,7 @@ export default function Navbar() {
     { href: '/tasks/new', label: 'New Task' },
     { href: '/workspaces', label: 'Workspaces' },
     { href: '/runners', label: 'Runners' },
+    { href: '/quota', label: 'Quota' },
   ];
 
   return (

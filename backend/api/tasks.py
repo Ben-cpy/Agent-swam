@@ -109,7 +109,7 @@ async def retry_task(
     if not original_task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if original_task.status != TaskStatus.FAILED:
+    if original_task.status not in (TaskStatus.FAILED, TaskStatus.FAILED_QUOTA):
         raise HTTPException(status_code=400, detail="Only failed tasks can be retried")
 
     # Create new task with same parameters

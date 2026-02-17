@@ -35,7 +35,7 @@ class CodexAdapter(BackendAdapter):
         - {"type": "turn.started", ...}
         - {"type": "message.text", "text": "..."}
         - {"type": "tool.use", ...}
-        - {"type": "turn.completed", ...}
+        - {"type": "turn.completed", "usage": {...}}
         """
         try:
             cmd = self.build_command(prompt)
@@ -48,6 +48,7 @@ class CodexAdapter(BackendAdapter):
 
         async for line, code in self.run_subprocess(cmd, should_terminate=should_terminate):
             if line.strip():
+                self._try_extract_from_jsonl(line)
                 # Try to parse JSONL and extract readable content
                 formatted_line = self._format_jsonl_line(line)
                 if formatted_line:
@@ -57,6 +58,36 @@ class CodexAdapter(BackendAdapter):
 
         # Yield exit code info
         yield f"\n[Process exited with code {exit_code}]\n"
+
+    def _try_extract_from_jsonl(self, line: str):
+        """Extract usage data and detect quota errors from JSONL events."""
+        try:
+            event = json.loads(line.strip())
+        except json.JSONDecodeError:
+            return
+
+        event_type = event.get("type", "")
+
+        # Extract usage from turn.completed
+        if event_type == "turn.completed" and "usage" in event:
+            usage = event["usage"]
+            self._usage_data = {
+                "input_tokens": usage.get("input_tokens"),
+                "output_tokens": usage.get("output_tokens"),
+                "total_tokens": usage.get("total_tokens"),
+            }
+
+        # Detect quota errors from error events
+        if event_type == "error":
+            msg = event.get("message", "").lower()
+            code_val = event.get("code", "")
+            code_str = str(code_val).lower() if code_val else ""
+            quota_signals = [
+                "rate limit", "rate_limit", "quota", "insufficient",
+                "billing", "too many requests", "429"
+            ]
+            if any(kw in msg for kw in quota_signals) or any(kw in code_str for kw in quota_signals):
+                self._is_quota_error = True
 
     def _format_jsonl_line(self, line: str) -> Optional[str]:
         """
@@ -105,7 +136,8 @@ class CodexAdapter(BackendAdapter):
         elif return_code == 127:
             return (False, "TOOL")
         elif return_code == 1:
-            # Default to CODE error for M1
+            if self._is_quota_error:
+                return (False, "QUOTA")
             return (False, "CODE")
         else:
             return (False, "NETWORK")

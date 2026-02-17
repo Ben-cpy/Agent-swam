@@ -1,13 +1,18 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from models import Task, Workspace, Runner, Run, TaskStatus, ErrorClass, WorkspaceType
+from models import Task, Workspace, Runner, Run, TaskStatus, ErrorClass, WorkspaceType, QuotaState, QuotaStateValue
 from core.backends import ClaudeCodeAdapter, CodexAdapter
 from datetime import datetime
 import asyncio
+import json
 import logging
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _backend_to_provider(backend: str) -> str:
+    return {"claude_code": "claude", "codex_cli": "openai"}.get(backend, backend)
 
 
 class TaskExecutor:
@@ -158,6 +163,10 @@ class TaskExecutor:
                 or await self._is_task_cancelled_in_db(task_id)
             )
 
+            # M3: read usage and quota state from adapter
+            usage_data = adapter.usage_data
+            is_quota_error = adapter.is_quota_error
+
             await self._persist_execution_result(
                 task_id=task_id,
                 run_id=run_id,
@@ -166,6 +175,9 @@ class TaskExecutor:
                 error_class_str=error_class_str,
                 log_blob="".join(log_lines),
                 was_cancelled=was_cancelled,
+                usage_data=usage_data,
+                is_quota_error=is_quota_error,
+                backend=backend,
             )
 
         except Exception as e:
@@ -183,6 +195,9 @@ class TaskExecutor:
         error_class_str: Optional[str],
         log_blob: str,
         was_cancelled: bool,
+        usage_data: Optional[dict] = None,
+        is_quota_error: bool = False,
+        backend: Optional[str] = None,
     ):
         async with self.db_session_maker() as db:
             task_result = await db.execute(select(Task).where(Task.id == task_id))
@@ -195,10 +210,22 @@ class TaskExecutor:
                 return
 
             run.ended_at = datetime.utcnow()
+
+            # M3: persist usage data
+            if usage_data:
+                run.usage_json = json.dumps(usage_data)
+
             if was_cancelled:
                 run.exit_code = 130
                 run.error_class = ErrorClass.UNKNOWN
                 task.status = TaskStatus.CANCELLED
+            elif is_quota_error:
+                # M3: quota error handling
+                run.exit_code = exit_code
+                run.error_class = ErrorClass.QUOTA
+                task.status = TaskStatus.FAILED_QUOTA
+                logger.warning(f"Task {task_id} failed due to quota exhaustion")
+                await self._set_quota_exhausted(db, backend)
             else:
                 run.exit_code = exit_code
                 if success:
@@ -217,6 +244,33 @@ class TaskExecutor:
             task.updated_at = datetime.utcnow()
             await db.commit()
             logger.info(f"Task {task_id} completed with status {task.status}")
+
+    async def _set_quota_exhausted(self, db: AsyncSession, backend: Optional[str]):
+        """Mark the provider as QUOTA_EXHAUSTED in the quota_states table."""
+        if not backend:
+            return
+        provider = _backend_to_provider(backend)
+        result = await db.execute(
+            select(QuotaState).where(
+                QuotaState.provider == provider,
+                QuotaState.account_label == "default",
+            )
+        )
+        qs = result.scalar_one_or_none()
+        if qs:
+            qs.state = QuotaStateValue.QUOTA_EXHAUSTED
+            qs.last_event_at = datetime.utcnow()
+            qs.note = "Auto-detected quota exhaustion"
+        else:
+            qs = QuotaState(
+                provider=provider,
+                account_label="default",
+                state=QuotaStateValue.QUOTA_EXHAUSTED,
+                last_event_at=datetime.utcnow(),
+                note="Auto-detected quota exhaustion",
+            )
+            db.add(qs)
+        logger.warning(f"Provider {provider} marked as QUOTA_EXHAUSTED")
 
     async def _persist_internal_error(self, task_id: int, run_id: int, error_msg: str):
         async with self.db_session_maker() as db:

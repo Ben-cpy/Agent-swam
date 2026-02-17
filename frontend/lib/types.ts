@@ -3,6 +3,7 @@ export enum TaskStatus {
   RUNNING = 'RUNNING',
   DONE = 'DONE',
   FAILED = 'FAILED',
+  FAILED_QUOTA = 'FAILED_QUOTA',
   CANCELLED = 'CANCELLED',
 }
 
@@ -78,6 +79,7 @@ export interface Run {
   ended_at?: string;
   exit_code?: number;
   error_class?: string;
+  usage_json?: string;
 }
 
 export interface LogEntry {
@@ -87,6 +89,16 @@ export interface LogEntry {
   ended_at?: string;
   exit_code?: number;
   log_blob: string;
+  usage_json?: string;
+}
+
+export interface QuotaState {
+  id: number;
+  provider: string;
+  account_label: string;
+  state: 'OK' | 'QUOTA_EXHAUSTED' | 'UNKNOWN';
+  last_event_at?: string;
+  note?: string;
 }
 
 export interface ApiMessage {

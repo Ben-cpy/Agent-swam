@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
-from models import Task, Workspace, Runner, TaskStatus, RunnerStatus
+from models import Task, Workspace, Runner, TaskStatus, RunnerStatus, QuotaState, QuotaStateValue
 from core.executor import TaskExecutor
 from datetime import datetime, timedelta
 from config import settings
@@ -8,6 +8,10 @@ import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _backend_to_provider(backend_value: str) -> str:
+    return {"claude_code": "claude", "codex_cli": "openai"}.get(backend_value, backend_value)
 
 
 class TaskScheduler:
@@ -138,6 +142,19 @@ class TaskScheduler:
         # Check runner capabilities
         if task.backend.value not in runner.capabilities:
             logger.warning(f"Runner {runner.runner_id} does not support backend {task.backend}")
+            return False
+
+        # M3: Check quota state for this backend's provider
+        provider = _backend_to_provider(task.backend.value)
+        quota_result = await db.execute(
+            select(QuotaState).where(
+                QuotaState.provider == provider,
+                QuotaState.account_label == "default",
+            )
+        )
+        quota = quota_result.scalar_one_or_none()
+        if quota and quota.state == QuotaStateValue.QUOTA_EXHAUSTED:
+            logger.debug(f"Provider {provider} is QUOTA_EXHAUSTED, skipping task {task.id}")
             return False
 
         # All checks passed, dispatch task

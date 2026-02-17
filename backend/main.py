@@ -23,7 +23,9 @@ from config import settings
 from database import init_db, close_db, async_session_maker
 from runner.agent import LocalRunnerAgent
 from core.scheduler import TaskScheduler, RunnerHeartbeat
-from api import tasks, workspaces, runners, logs
+from api import tasks, workspaces, runners, logs, quota
+from models import QuotaState, QuotaStateValue
+from sqlalchemy import select
 
 # Configure logging
 logging.basicConfig(
@@ -46,6 +48,23 @@ async def lifespan(app: FastAPI):
     # Register local runner
     async with async_session_maker() as db:
         await LocalRunnerAgent.register_local_runner(db)
+
+    # M3: Seed default quota states
+    async with async_session_maker() as db:
+        for provider in ["claude", "openai"]:
+            result = await db.execute(
+                select(QuotaState).where(
+                    QuotaState.provider == provider,
+                    QuotaState.account_label == "default",
+                )
+            )
+            if not result.scalar_one_or_none():
+                db.add(QuotaState(
+                    provider=provider,
+                    account_label="default",
+                    state=QuotaStateValue.OK,
+                ))
+        await db.commit()
 
     # Start scheduler and heartbeat
     scheduler = TaskScheduler(async_session_maker)
@@ -73,7 +92,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI Task Manager API",
     description="Backend API for managing AI tasks with Claude Code and Codex CLI",
-    version="1.0.0-M1",
+    version="1.0.0-M3",
     lifespan=lifespan
 )
 
@@ -91,6 +110,7 @@ app.include_router(tasks.router)
 app.include_router(workspaces.router)
 app.include_router(runners.router)
 app.include_router(logs.router)
+app.include_router(quota.router)
 
 
 @app.get("/")
@@ -99,7 +119,7 @@ async def root():
     return {
         "status": "ok",
         "message": "AI Task Manager API",
-        "version": "1.0.0-M1"
+        "version": "1.0.0-M3"
     }
 
 

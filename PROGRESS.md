@@ -28,3 +28,17 @@
 - Fix: Added explicit cross-platform CLI resolver and switched adapters to execute real binaries (`codex.cmd` / `claude.cmd` on Windows), added clearer CLI-not-found handling, and implemented task delete API + frontend delete button in task detail page.
 - Prevention: Never rely on shell aliases for subprocess execution in Python on Windows; always resolve concrete executable path first.
 - Git Commit ID: 269a09e
+
+## 2026-02-17 - M3 Quota Monitoring & Stop-on-Exhaustion (Commit: pending)
+- Problem: No usage tracking or quota monitoring; tasks ran without cost awareness, and quota exhaustion was not detected or handled.
+- Fix: Implemented full M3 milestone:
+  - Added `QuotaState` model, `FAILED_QUOTA` task status, `QUOTA` error class, `usage_json` on runs
+  - Claude adapter parses stream-json `result` events for cost/usage, detects `rate_limit_error` from `error` events
+  - Codex adapter parses `turn.completed` events for token usage, detects quota errors from `error` events
+  - Both adapters fall back to plain-text keyword scanning for quota signals
+  - Executor persists `usage_json`, marks tasks `FAILED_QUOTA` on quota errors, updates `quota_states` table
+  - Scheduler checks `quota_states` before dispatching—skips tasks whose provider is `QUOTA_EXHAUSTED`
+  - New `/api/quota` endpoints (list + reset) for manual quota recovery
+  - Frontend: global red alert bar, 6-column kanban with `FAILED_QUOTA`, quota management page with reset buttons, retry support for quota-failed tasks
+- Prevention: Use adapter instance attributes (not yield interface changes) for side-channel data; always use `values_callable` for new enum columns; seed default rows at startup to avoid null queries.
+- Git Commit ID: pending

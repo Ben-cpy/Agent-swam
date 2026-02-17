@@ -114,5 +114,6 @@ async def get_logs(
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "ended_at": run.ended_at.isoformat() if run.ended_at else None,
         "exit_code": run.exit_code,
-        "log_blob": run.log_blob or ""
+        "log_blob": run.log_blob or "",
+        "usage_json": run.usage_json,
     }

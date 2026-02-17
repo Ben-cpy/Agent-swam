@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, List
-from models import TaskStatus, BackendType, RunnerStatus, ErrorClass, WorkspaceType
+from models import TaskStatus, BackendType, RunnerStatus, ErrorClass, WorkspaceType, QuotaStateValue
 
 
 # Task Schemas
@@ -100,6 +100,7 @@ class RunResponse(RunBase):
     ended_at: Optional[datetime] = None
     exit_code: Optional[int] = None
     error_class: Optional[ErrorClass] = None
+    usage_json: Optional[str] = None
 
     class Config:
         orm_mode = True
@@ -110,3 +111,16 @@ class LogEvent(BaseModel):
     run_id: int
     timestamp: datetime
     content: str
+
+
+# Quota Schemas
+class QuotaStateResponse(BaseModel):
+    id: int
+    provider: str
+    account_label: str
+    state: QuotaStateValue
+    last_event_at: Optional[datetime] = None
+    note: Optional[str] = None
+
+    class Config:
+        orm_mode = True

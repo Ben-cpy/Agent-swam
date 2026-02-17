@@ -2,6 +2,7 @@ import axios from 'axios';
 import {
   ApiMessage,
   LogEntry,
+  QuotaState,
   Runner,
   Task,
   TaskCreateInput,
@@ -59,4 +60,11 @@ export const logAPI = {
 
   streamURL: (runId: number) =>
     `${NORMALIZED_API_BASE}/logs/${runId}/stream`,
+};
+
+// Quota APIs
+export const quotaAPI = {
+  list: () => apiClient.get<QuotaState[]>('/quota'),
+  reset: (provider: string) =>
+    apiClient.post<ApiMessage>(`/quota/${provider}/reset`),
 };

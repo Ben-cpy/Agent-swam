@@ -68,6 +68,12 @@ async def init_db():
             await conn.execute(
                 text("UPDATE workspaces SET workspace_type='ssh_container' WHERE workspace_type='SSH_CONTAINER'")
             )
+
+            # M3: Add usage_json column to runs table
+            result_runs = await conn.execute(text("PRAGMA table_info(runs)"))
+            run_columns = {row[1] for row in result_runs.fetchall()}
+            if "usage_json" not in run_columns:
+                await conn.execute(text("ALTER TABLE runs ADD COLUMN usage_json TEXT"))
     print("Database initialized")
 
 
