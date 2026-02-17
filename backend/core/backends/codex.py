@@ -1,5 +1,6 @@
 from typing import AsyncIterator, Optional, Callable, Awaitable, Union
 from .base import BackendAdapter
+from .cli_resolver import resolve_cli
 import json
 
 
@@ -13,7 +14,7 @@ class CodexAdapter(BackendAdapter):
         Format: codex exec --json --sandbox danger-full-access --cd <workspace> "<prompt>"
         """
         return [
-            "codex",
+            resolve_cli("codex"),
             "exec",
             "--json",  # Output JSONL events
             "--sandbox", "danger-full-access",  # Allow full filesystem access
@@ -36,7 +37,12 @@ class CodexAdapter(BackendAdapter):
         - {"type": "tool.use", ...}
         - {"type": "turn.completed", ...}
         """
-        cmd = self.build_command(prompt)
+        try:
+            cmd = self.build_command(prompt)
+        except FileNotFoundError as e:
+            yield f"[ERROR] {e}\n"
+            yield "\n[Process exited with code 127]\n"
+            return
 
         exit_code = 0
 
@@ -96,6 +102,8 @@ class CodexAdapter(BackendAdapter):
             return (True, None)
         elif return_code == 130:
             return (False, None)
+        elif return_code == 127:
+            return (False, "TOOL")
         elif return_code == 1:
             # Default to CODE error for M1
             return (False, "CODE")

@@ -1,5 +1,6 @@
 from typing import AsyncIterator, Optional, Callable, Awaitable, Union
 from .base import BackendAdapter
+from .cli_resolver import resolve_cli
 import os
 
 
@@ -16,7 +17,7 @@ class ClaudeCodeAdapter(BackendAdapter):
         # This will be handled in execution environment
 
         return [
-            "claude",
+            resolve_cli("claude"),
             "-p",  # Project mode
             "--output-format", "stream-json",
             "--dangerously-skip-permissions",
@@ -36,7 +37,12 @@ class ClaudeCodeAdapter(BackendAdapter):
         - {"type": "tool_use", "name": "...", ...}
         - etc.
         """
-        cmd = self.build_command(prompt)
+        try:
+            cmd = self.build_command(prompt)
+        except FileNotFoundError as e:
+            yield f"[ERROR] {e}\n"
+            yield "\n[Process exited with code 127]\n"
+            return
 
         # Temporarily unset CLAUDECODE env var for subprocess
         env = os.environ.copy()
@@ -67,6 +73,8 @@ class ClaudeCodeAdapter(BackendAdapter):
             return (True, None)
         elif return_code == 130:
             return (False, None)
+        elif return_code == 127:
+            return (False, "TOOL")
         elif return_code == 1:
             # Need to analyze logs to determine exact error class
             # For M1, default to TOOL

@@ -36,6 +36,9 @@ export const taskAPI = {
 
   retry: (id: number) =>
     apiClient.post<Task>(`/tasks/${id}/retry`),
+
+  delete: (id: number) =>
+    apiClient.delete<ApiMessage>(`/tasks/${id}`),
 };
 
 // Workspace APIs

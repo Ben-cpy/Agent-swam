@@ -68,6 +68,21 @@ export default function TaskDetailPage() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!confirm('Are you sure you want to delete this task?')) {
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      await taskAPI.delete(taskId);
+      router.push('/');
+    } catch (error: unknown) {
+      alert(`Failed to delete task: ${getErrorMessage(error, 'Unknown error')}`);
+      setActionLoading(false);
+    }
+  };
+
   const getStatusBadge = (status: TaskStatus) => {
     const classNames: Record<TaskStatus, string> = {
       [TaskStatus.TODO]: 'bg-slate-100 text-slate-800',
@@ -128,6 +143,15 @@ export default function TaskDetailPage() {
           {task.status === TaskStatus.FAILED && (
             <Button onClick={handleRetry} disabled={actionLoading}>
               Retry Task
+            </Button>
+          )}
+          {task.status !== TaskStatus.RUNNING && (
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={actionLoading}
+            >
+              Delete Task
             </Button>
           )}
           <Button variant="outline" onClick={() => router.push('/')}>

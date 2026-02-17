@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
 from database import get_db, async_session_maker
-from models import Task, TaskStatus, Workspace
+from models import Task, TaskStatus, Workspace, Run
 from schemas import TaskCreate, TaskResponse
 from core.executor import TaskExecutor
 from datetime import datetime
@@ -128,3 +128,37 @@ async def retry_task(
     await db.refresh(new_task)
 
     return new_task
+
+
+@router.delete("/{task_id}")
+async def delete_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete a task and its related run records."""
+    result = await db.execute(
+        select(Task).where(Task.id == task_id)
+    )
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status == TaskStatus.RUNNING:
+        raise HTTPException(status_code=400, detail="Cannot delete a running task. Cancel it first.")
+
+    # Break potential FK cycle before deleting runs.
+    task.run_id = None
+    await db.flush()
+
+    runs_result = await db.execute(
+        select(Run).where(Run.task_id == task.id)
+    )
+    runs = runs_result.scalars().all()
+    for run in runs:
+        await db.delete(run)
+
+    await db.delete(task)
+    await db.commit()
+
+    return {"message": "Task deleted successfully"}
