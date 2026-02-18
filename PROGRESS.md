@@ -42,3 +42,9 @@
   - Frontend: global red alert bar, 6-column kanban with `FAILED_QUOTA`, quota management page with reset buttons, retry support for quota-failed tasks
 - Prevention: Use adapter instance attributes (not yield interface changes) for side-channel data; always use `values_callable` for new enum columns; seed default rows at startup to avoid null queries.
 - Git Commit ID: pending
+
+## 2026-02-18 - Velvet Mapping Sprout Refactor (Commit: 8831cad)
+- Problem: Task board/status model and API surface became over-complex (`FAILED_QUOTA`/`CANCELLED`, quota/runners/usage pages), and tasks executed directly in the workspace without git worktree isolation.
+- Fix: Removed quota/runners/usage frontend pages and backend routers, unified task status to `TODO/RUNNING/DONE/FAILED` with startup migration for legacy statuses, added per-task `branch_name/worktree_path` fields, implemented auto-branch detection + git worktree creation in executor, and updated UI (4-column board spacing + optional base branch input + task detail worktree fields).
+- Prevention: Keep user-visible status enums minimal, avoid coupling core task execution to optional monitoring UI, and require build validation after route deletion (clear stale `.next` cache when needed).
+- Git Commit ID: 8831cad
