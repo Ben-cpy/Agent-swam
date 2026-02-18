@@ -28,6 +28,7 @@ export interface Task {
   run_id?: number;
   branch_name?: string | null;
   worktree_path?: string | null;
+  model?: string | null;
 }
 
 export interface TaskCreateInput {
@@ -36,6 +37,18 @@ export interface TaskCreateInput {
   workspace_id: number;
   backend: BackendType;
   branch_name?: string;
+  model?: string;
+}
+
+export interface BackendModelInfo {
+  backend: string;
+  models: string[];
+  default: string;
+  reasoning_efforts?: string[];
+}
+
+export interface ModelsListResponse {
+  results: BackendModelInfo[];
 }
 
 export interface Workspace {

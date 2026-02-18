@@ -11,6 +11,7 @@ class TaskBase(BaseModel):
     workspace_id: int
     backend: BackendType
     branch_name: Optional[str] = Field(None, max_length=200)
+    model: Optional[str] = None
 
 
 class TaskCreate(TaskBase):

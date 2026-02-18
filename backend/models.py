@@ -56,6 +56,7 @@ class Task(Base):
     run_id = Column(Integer, ForeignKey("runs.run_id"), nullable=True)
     branch_name = Column(String(200), nullable=True)
     worktree_path = Column(String(1000), nullable=True)
+    model = Column(String(200), nullable=True)
 
     # Relationships
     workspace = relationship("Workspace", back_populates="tasks")

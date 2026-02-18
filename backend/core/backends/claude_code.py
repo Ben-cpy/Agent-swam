@@ -8,19 +8,26 @@ import os
 class ClaudeCodeAdapter(BackendAdapter):
     """Adapter for Claude Code CLI"""
 
+    def __init__(self, workspace_path: str, model: Optional[str] = None):
+        super().__init__(workspace_path)
+        self.model = model
+
     def build_command(self, prompt: str) -> list[str]:
         """
         Build Claude Code command with streaming JSON output.
 
-        Format: claude -p --output-format stream-json --dangerously-skip-permissions <prompt>
+        Format: claude -p --output-format stream-json --dangerously-skip-permissions [--model <model>] <prompt>
         """
-        return [
+        cmd = [
             resolve_cli("claude"),
             "-p",  # Project mode
             "--output-format", "stream-json",
             "--dangerously-skip-permissions",
-            prompt
         ]
+        if self.model:
+            cmd += ["--model", self.model]
+        cmd.append(prompt)
+        return cmd
 
     async def execute(
         self,

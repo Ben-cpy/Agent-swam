@@ -30,6 +30,7 @@ async def create_task(
         workspace_id=task.workspace_id,
         backend=task.backend,
         branch_name=task.branch_name,
+        model=task.model,
         status=TaskStatus.TODO,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc)
@@ -145,6 +146,7 @@ async def retry_task(
         workspace_id=original_task.workspace_id,
         backend=original_task.backend,
         branch_name=original_task.branch_name,
+        model=original_task.model,
         status=TaskStatus.TODO,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc)

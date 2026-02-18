@@ -2,6 +2,7 @@ import axios from 'axios';
 import {
   ApiMessage,
   LogEntry,
+  ModelsListResponse,
   NextTaskNumber,
   Task,
   TaskCreateInput,
@@ -57,4 +58,10 @@ export const logAPI = {
 
   streamURL: (runId: number) =>
     `${NORMALIZED_API_BASE}/logs/${runId}/stream`,
+};
+
+// Models APIs
+export const modelsAPI = {
+  list: (refresh?: boolean) =>
+    apiClient.get<ModelsListResponse>('/models', { params: refresh ? { refresh: true } : {} }),
 };

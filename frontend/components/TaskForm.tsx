@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
-import { taskAPI, workspaceAPI } from '@/lib/api';
-import { ApiErrorBody, BackendType, Workspace } from '@/lib/types';
+import useSWR from 'swr';
+import { taskAPI, workspaceAPI, modelsAPI } from '@/lib/api';
+import { ApiErrorBody, BackendModelInfo, BackendType, ModelsListResponse, Workspace } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -17,6 +18,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+
+const modelsFetcher = () => modelsAPI.list().then((res) => res.data);
 
 export default function TaskForm() {
   const router = useRouter();
@@ -31,6 +34,7 @@ export default function TaskForm() {
     workspace_id: '',
     backend: BackendType.CLAUDE_CODE,
     branch_name: '',
+    model: '',
   });
 
   const [errors, setErrors] = useState({
@@ -38,6 +42,24 @@ export default function TaskForm() {
     prompt: '',
     workspace_id: '',
   });
+
+  // Fetch model list via SWR (cached, auto-refreshed)
+  const { data: modelsData } = useSWR<ModelsListResponse>('/api/models', modelsFetcher, {
+    revalidateOnFocus: false,
+  });
+
+  // Derive model info for the currently selected backend
+  const currentBackendModels: BackendModelInfo | undefined = modelsData?.results?.find(
+    (r) => r.backend === formData.backend
+  );
+
+  // When backend changes, reset model to the new backend's default
+  useEffect(() => {
+    if (currentBackendModels) {
+      setFormData((prev) => ({ ...prev, model: currentBackendModels.default || '' }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.backend, modelsData]);
 
   // Fetch suggested title when workspace changes
   const fetchSuggestedTitle = async (workspaceId: string) => {
@@ -114,6 +136,7 @@ export default function TaskForm() {
         workspace_id: parseInt(formData.workspace_id),
         backend: formData.backend,
         branch_name: formData.branch_name.trim() || undefined,
+        model: formData.model.trim() || undefined,
       });
 
       // Redirect to task board
@@ -270,6 +293,32 @@ export default function TaskForm() {
               </label>
             </div>
           </div>
+
+          {/* Model selection - shown after backend is selected and models are loaded */}
+          {currentBackendModels && currentBackendModels.models.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="model">Model</Label>
+              <Select
+                value={formData.model}
+                onValueChange={(value) => setFormData({ ...formData, model: value })}
+              >
+                <SelectTrigger id="model">
+                  <SelectValue placeholder="Select a model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {currentBackendModels.models.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {m}
+                      {m === currentBackendModels.default ? ' (default)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Default: {currentBackendModels.default}
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="branch_name">Base Branch (optional)</Label>

@@ -7,21 +7,37 @@ import json
 class CodexAdapter(BackendAdapter):
     """Adapter for Codex CLI"""
 
+    def __init__(
+        self,
+        workspace_path: str,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+    ):
+        super().__init__(workspace_path)
+        self.model = model
+        self.reasoning_effort = reasoning_effort
+
     def build_command(self, prompt: str) -> list[str]:
         """
         Build Codex CLI command.
 
-        Format: codex exec --json --sandbox danger-full-access --cd <workspace> "<prompt>"
+        Format: codex exec --json --sandbox danger-full-access --cd <workspace>
+                [--model <model>] [--reasoning-effort <effort>] "<prompt>"
         """
-        return [
+        cmd = [
             resolve_cli("codex"),
             "exec",
             "--json",  # Output JSONL events
             "--sandbox", "danger-full-access",  # Allow full filesystem access
             "--cd", self.workspace_path,  # Set working directory
             "--skip-git-repo-check",  # Allow running outside git repo
-            prompt
         ]
+        if self.model:
+            cmd += ["--model", self.model]
+        if self.reasoning_effort:
+            cmd += ["--reasoning-effort", self.reasoning_effort]
+        cmd.append(prompt)
+        return cmd
 
     async def execute(
         self,
