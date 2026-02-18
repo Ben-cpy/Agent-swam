@@ -81,6 +81,9 @@ async def init_db():
             run_columns = {row[1] for row in result_runs.fetchall()}
             if "usage_json" not in run_columns:
                 await conn.execute(text("ALTER TABLE runs ADD COLUMN usage_json TEXT"))
+            # Feat3: Add tmux_session column to runs table
+            if "tmux_session" not in run_columns:
+                await conn.execute(text("ALTER TABLE runs ADD COLUMN tmux_session VARCHAR(200)"))
     print("Database initialized")
 
 
