@@ -50,6 +50,7 @@ export const taskAPI = {
 export const workspaceAPI = {
   list: () => apiClient.get<Workspace[]>('/workspaces'),
   create: (data: WorkspaceCreateInput) => apiClient.post<Workspace>('/workspaces', data),
+  delete: (id: number) => apiClient.delete(`/workspaces/${id}`),
 };
 
 // Usage APIs

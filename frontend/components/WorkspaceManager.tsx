@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import axios from 'axios';
 import useSWR from 'swr';
+import { Trash2 } from 'lucide-react';
 import { workspaceAPI } from '@/lib/api';
 import { ApiErrorBody, Workspace, WorkspaceCreateInput, WorkspaceType } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -88,6 +89,20 @@ export default function WorkspaceManager() {
       container_name: workspaceType === WorkspaceType.SSH_CONTAINER ? prev.container_name : '',
       port: workspaceType === WorkspaceType.LOCAL ? '22' : prev.port || '22',
     }));
+  };
+
+  const handleDeleteWorkspace = async (workspaceId: number, name: string) => {
+    if (!window.confirm(`Delete workspace "${name}"? This will also delete all its tasks and run history.`)) return;
+    try {
+      await workspaceAPI.delete(workspaceId);
+      await mutateWorkspaces();
+    } catch (err: unknown) {
+      if (axios.isAxiosError<ApiErrorBody>(err)) {
+        alert(err.response?.data?.detail || err.message || 'Failed to delete workspace');
+      } else {
+        alert('Failed to delete workspace');
+      }
+    }
   };
 
   const handleCreateWorkspace = async (e: React.FormEvent) => {
@@ -257,8 +272,17 @@ export default function WorkspaceManager() {
             <div key={ws.workspace_id} className="border rounded-lg p-4 space-y-2">
               <div className="flex items-center justify-between">
                 <div className="font-medium">{ws.display_name}</div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                   <Badge variant="outline">{getWorkspaceTypeLabel(ws.workspace_type)}</Badge>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-destructive hover:text-destructive h-7 w-7"
+                    onClick={() => handleDeleteWorkspace(ws.workspace_id, ws.display_name)}
+                    title="Delete workspace"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
                 </div>
               </div>
               <div className="text-sm text-muted-foreground break-all">

@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 from database import get_db
-from models import Workspace, Runner, WorkspaceType
+from models import Workspace, Runner, WorkspaceType, Task, TaskStatus, Run
 from schemas import WorkspaceCreate, WorkspaceResponse
 import os
 
@@ -117,3 +117,50 @@ async def get_workspace(
         raise HTTPException(status_code=404, detail="Workspace not found")
 
     return workspace
+
+
+@router.delete("/{workspace_id}", status_code=204)
+async def delete_workspace(
+    workspace_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete a workspace. Rejects if any task is currently RUNNING."""
+    ws_result = await db.execute(
+        select(Workspace).where(Workspace.workspace_id == workspace_id)
+    )
+    workspace = ws_result.scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    # Guard: reject if any task is RUNNING in this workspace
+    running_result = await db.execute(
+        select(Task).where(
+            Task.workspace_id == workspace_id,
+            Task.status == TaskStatus.RUNNING,
+        )
+    )
+    if running_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete workspace with running tasks. Cancel them first.",
+        )
+
+    # Cascade: delete runs then tasks for this workspace
+    tasks_result = await db.execute(
+        select(Task).where(Task.workspace_id == workspace_id)
+    )
+    tasks = tasks_result.scalars().all()
+    for task in tasks:
+        task.run_id = None
+    await db.flush()
+
+    for task in tasks:
+        runs_result = await db.execute(
+            select(Run).where(Run.task_id == task.id)
+        )
+        for run in runs_result.scalars().all():
+            await db.delete(run)
+        await db.delete(task)
+
+    await db.delete(workspace)
+    await db.commit()

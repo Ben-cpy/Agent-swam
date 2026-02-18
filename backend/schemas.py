@@ -30,6 +30,17 @@ class TaskResponse(TaskBase):
     updated_at: datetime
     run_id: Optional[int] = None
     worktree_path: Optional[str] = None
+    run_started_at: Optional[datetime] = None
+
+    @classmethod
+    def from_orm(cls, obj):
+        instance = super().from_orm(obj)
+        try:
+            if obj.run is not None:
+                instance.run_started_at = obj.run.started_at
+        except Exception:
+            pass
+        return instance
 
     class Config:
         orm_mode = True

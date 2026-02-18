@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from database import get_db, async_session_maker
 from models import Task, TaskStatus, Workspace, Run
@@ -49,7 +50,7 @@ async def list_tasks(
     db: AsyncSession = Depends(get_db)
 ):
     """List all tasks, optionally filtered by status"""
-    query = select(Task)
+    query = select(Task).options(selectinload(Task.run))
 
     if status:
         query = query.where(Task.status == status)
@@ -94,7 +95,7 @@ async def get_task(
 ):
     """Get a specific task by ID"""
     result = await db.execute(
-        select(Task).where(Task.id == task_id)
+        select(Task).options(selectinload(Task.run)).where(Task.id == task_id)
     )
     task = result.scalar_one_or_none()
 

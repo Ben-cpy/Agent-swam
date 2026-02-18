@@ -29,6 +29,7 @@ export interface Task {
   branch_name?: string | null;
   worktree_path?: string | null;
   model?: string | null;
+  run_started_at?: string | null;
 }
 
 export interface TaskCreateInput {

@@ -36,6 +36,11 @@ export default function TaskBoard({ tasks }: TaskBoardProps) {
 
   const groupedTasks = groupTasksByStatus(tasks);
 
+  // Workspaces that currently have a RUNNING task — TODO tasks for these are "queued"
+  const busyWorkspaceIds = new Set(
+    groupedTasks[TaskStatus.RUNNING].map((t) => t.workspace_id)
+  );
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       {statusColumns.map((column) => {
@@ -60,7 +65,14 @@ export default function TaskBoard({ tasks }: TaskBoardProps) {
                 </div>
               ) : (
                 columnTasks.map((task) => (
-                  <TaskCard key={task.id} task={task} />
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    isQueued={
+                      column.status === TaskStatus.TODO &&
+                      busyWorkspaceIds.has(task.workspace_id)
+                    }
+                  />
                 ))
               )}
             </div>
