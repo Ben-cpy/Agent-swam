@@ -3,6 +3,7 @@
 import useSWR from 'swr';
 import { taskAPI } from '@/lib/api';
 import TaskBoard from '@/components/TaskBoard';
+import UsageSummary from '@/components/UsageSummary';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 
@@ -29,6 +30,9 @@ export default function Home() {
 
   return (
     <div className="space-y-6">
+      {/* Usage Summary */}
+      <UsageSummary />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+﻿from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
@@ -24,7 +24,7 @@ from config import settings
 from database import init_db, close_db, async_session_maker
 from runner.agent import LocalRunnerAgent
 from core.scheduler import TaskScheduler, RunnerHeartbeat
-from api import tasks, workspaces, logs
+from api import tasks, workspaces, logs, usage
 from api import models as models_api
 
 # Configure logging
@@ -38,9 +38,9 @@ logger = logging.getLogger(__name__)
 # Lifespan management
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and shutdown events"""
+    Startup and shutdown events
     # Startup
-    logger.info("Starting AI Task Manager backend...")
+    logger.info(Starting AI Task Manager backend...)
 
     # Initialize database
     await init_db()
@@ -48,14 +48,14 @@ async def lifespan(app: FastAPI):
     async with async_session_maker() as db:
         result = await db.execute(
             text(
-                "UPDATE tasks SET status = 'FAILED' "
-                "WHERE status IN ('FAILED_QUOTA', 'CANCELLED')"
+                UPDATE tasks SET status = 'FAILED' 
+                WHERE status IN ('FAILED_QUOTA', 'CANCELLED')
             )
         )
         await db.commit()
         migrated = result.rowcount or 0
         if migrated > 0:
-            logger.info("Migrated %s tasks from legacy statuses to FAILED", migrated)
+            logger.info(Migrated %s tasks from legacy statuses to FAILED, migrated)
 
     # Register local runner
     async with async_session_maker() as db:
@@ -72,12 +72,12 @@ async def lifespan(app: FastAPI):
     app.state.scheduler = scheduler
     app.state.heartbeat = heartbeat
 
-    logger.info(f"✓ Server ready on http://{settings.api_host}:{settings.api_port}")
+    logger.info(fServer ready on http://{settings.api_host}:{settings.api_port})
 
     yield
 
     # Shutdown
-    logger.info("Shutting down...")
+    logger.info(Shutting down...)
     await scheduler.stop()
     await heartbeat.stop()
     await close_db()
@@ -85,9 +85,9 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="AI Task Manager API",
-    description="Backend API for managing AI tasks with Claude Code and Codex CLI",
-    version="1.0.0-M3",
+    title=AI Task Manager API,
+    description=Backend API for managing AI tasks with Claude Code and Codex CLI,
+    version=1.0.0-M3,
     lifespan=lifespan
 )
 
@@ -96,8 +96,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=[*],
+    allow_headers=[*],
 )
 
 # Include routers
@@ -105,27 +105,28 @@ app.include_router(tasks.router)
 app.include_router(workspaces.router)
 app.include_router(logs.router)
 app.include_router(models_api.router)
+app.include_router(usage.router)
 
 
-@app.get("/")
+@app.get(/)
 async def root():
-    """Health check endpoint"""
+    Health check endpoint
     return {
-        "status": "ok",
-        "message": "AI Task Manager API",
-        "version": "1.0.0-M3"
+        status: ok,
+        message: AI Task Manager API,
+        version: 1.0.0-M3
     }
 
 
-@app.get("/health")
+@app.get(/health)
 async def health():
-    """Health check endpoint"""
-    return {"status": "healthy"}
+    Health check endpoint
+    return {status: healthy}
 
 
-if __name__ == "__main__":
+if __name__ == __main__:
     uvicorn.run(
-        "main:app",
+        main:app,
         host=settings.api_host,
         port=settings.api_port,
         reload=False,  # Disable in production
