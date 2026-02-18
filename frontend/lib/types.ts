@@ -96,3 +96,22 @@ export interface NextTaskNumber {
   next_number: number;
   suggested_title: string;
 }
+
+export interface BackendUsage {
+  runs: number;
+  cost_usd: number;
+  tokens: number;
+}
+
+export interface UsageStats {
+  runs_count: number;
+  total_cost_usd: number;
+  total_tokens: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  by_backend: {
+    claude_code: BackendUsage;
+    codex_cli: BackendUsage;
+    [key: string]: BackendUsage;
+  };
+}

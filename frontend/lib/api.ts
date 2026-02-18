@@ -6,6 +6,7 @@ import {
   Task,
   TaskCreateInput,
   TaskStatus,
+  UsageStats,
   Workspace,
   WorkspaceCreateInput,
 } from './types';
@@ -48,6 +49,11 @@ export const taskAPI = {
 export const workspaceAPI = {
   list: () => apiClient.get<Workspace[]>('/workspaces'),
   create: (data: WorkspaceCreateInput) => apiClient.post<Workspace>('/workspaces', data),
+};
+
+// Usage APIs
+export const usageAPI = {
+  get: () => apiClient.get<UsageStats>('/usage'),
 };
 
 // Log APIs
