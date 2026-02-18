@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import shlex
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -91,16 +92,7 @@ class TaskExecutor:
             logger.error("Workspace %s not found", task.workspace_id)
             return False
 
-        if workspace.workspace_type != WorkspaceType.LOCAL:
-            task.status = TaskStatus.FAILED
-            task.updated_at = datetime.now(timezone.utc)
-            await db.commit()
-            logger.error(
-                "Workspace %s type %s is not executable yet (only local supported in current runner)",
-                workspace.workspace_id,
-                workspace.workspace_type.value,
-            )
-            return False
+        is_ssh_workspace = workspace.workspace_type in (WorkspaceType.SSH, WorkspaceType.SSH_CONTAINER)
 
         runner_result = await db.execute(
             select(Runner).where(Runner.runner_id == workspace.runner_id)
@@ -110,6 +102,53 @@ class TaskExecutor:
             logger.error("Runner %s not found", workspace.runner_id)
             return False
 
+        if is_ssh_workspace:
+            # SSH workspace: run task in a tmux session on the remote host
+            ssh_host = workspace.host
+            if not ssh_host:
+                task.status = TaskStatus.FAILED
+                task.updated_at = datetime.now(timezone.utc)
+                await db.commit()
+                logger.error("SSH workspace %s has no host configured", workspace.workspace_id)
+                return False
+
+            tmux_session_name = f"aitask-{task_id}"
+            run = Run(
+                task_id=task.id,
+                runner_id=runner.runner_id,
+                backend=task.backend.value,
+                started_at=datetime.now(timezone.utc),
+                tmux_session=tmux_session_name,
+            )
+            db.add(run)
+            await db.flush()
+
+            task.status = TaskStatus.RUNNING
+            task.run_id = run.run_id
+            task.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+
+            logger.info(
+                "Starting SSH task %s on host %s in tmux session %s",
+                task_id,
+                ssh_host,
+                tmux_session_name,
+            )
+
+            asyncio.create_task(
+                self._run_ssh_task(
+                    task_id=task.id,
+                    run_id=run.run_id,
+                    ssh_host=ssh_host,
+                    workspace_path=workspace.path,
+                    backend=task.backend.value,
+                    prompt=task.prompt,
+                    tmux_session=tmux_session_name,
+                )
+            )
+            return True
+
+        # Local workspace: detect branch and create worktree
         if not task.branch_name:
             try:
                 task.branch_name = await self._detect_current_branch(workspace.path)
@@ -219,6 +258,102 @@ class TaskExecutor:
             )
         except Exception as exc:
             logger.error("Error executing task %s: %s", task_id, exc, exc_info=True)
+            await self._persist_internal_error(task_id, run_id, str(exc))
+        finally:
+            self._cancelled_task_ids.discard(task_id)
+
+    async def _run_ssh_task(
+        self,
+        task_id: int,
+        run_id: int,
+        ssh_host: str,
+        workspace_path: str,
+        backend: str,
+        prompt: str,
+        tmux_session: str,
+    ):
+        """Run a task on a remote SSH host using tmux for session persistence."""
+        try:
+            log_file = f"/tmp/{tmux_session}.log"
+
+            if backend == "claude_code":
+                cli_cmd = f"claude -p --output-format stream-json --dangerously-skip-permissions {shlex.quote(prompt)}"
+            elif backend == "codex_cli":
+                cli_cmd = f"codex -p {shlex.quote(prompt)}"
+            else:
+                raise ValueError(f"Unknown backend: {backend}")
+
+            # Build the tmux command: create a new session running the CLI, piping output to a log file
+            # The session is kept alive after the command finishes (tmux default behavior)
+            tmux_cmd = (
+                f"tmux new-session -d -s {shlex.quote(tmux_session)} "
+                f"'({cli_cmd}) 2>&1 | tee {shlex.quote(log_file)}; "
+                f"echo EXIT_CODE:$? >> {shlex.quote(log_file)}'"
+            )
+
+            # Launch the tmux session on the remote host
+            launch_proc = await asyncio.create_subprocess_exec(
+                "ssh", ssh_host, tmux_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _stdout, stderr = await launch_proc.communicate()
+            if launch_proc.returncode != 0:
+                err_msg = stderr.decode(errors="replace").strip()
+                raise RuntimeError(f"Failed to start SSH tmux session: {err_msg}")
+
+            logger.info("SSH tmux session %s started on %s", tmux_session, ssh_host)
+
+            # Stream the log file from the remote host via tail -f
+            tail_proc = await asyncio.create_subprocess_exec(
+                "ssh", ssh_host, f"tail -f {shlex.quote(log_file)}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            log_lines = []
+            exit_code = None
+
+            assert tail_proc.stdout is not None
+            async for raw_line in tail_proc.stdout:
+                line = raw_line.decode(errors="replace")
+                log_lines.append(line)
+
+                if self._is_task_marked_cancelled(task_id):
+                    tail_proc.terminate()
+                    # Kill tmux session on remote
+                    await asyncio.create_subprocess_exec(
+                        "ssh", ssh_host,
+                        f"tmux kill-session -t {shlex.quote(tmux_session)} 2>/dev/null || true",
+                    )
+                    break
+
+                if line.startswith("EXIT_CODE:"):
+                    try:
+                        exit_code = int(line.strip().split("EXIT_CODE:")[1])
+                    except Exception:
+                        exit_code = 1
+                    tail_proc.terminate()
+                    break
+
+            if exit_code is None:
+                exit_code = 1
+
+            success = exit_code == 0
+            error_class_str = None if success else "UNKNOWN"
+            was_cancelled = self._is_task_marked_cancelled(task_id)
+
+            await self._persist_execution_result(
+                task_id=task_id,
+                run_id=run_id,
+                exit_code=exit_code,
+                success=success and not was_cancelled,
+                error_class_str=error_class_str,
+                log_blob="".join(log_lines),
+                was_cancelled=was_cancelled,
+            )
+        except Exception as exc:
+            logger.error("Error executing SSH task %s: %s", task_id, exc, exc_info=True)
             await self._persist_internal_error(task_id, run_id, str(exc))
         finally:
             self._cancelled_task_ids.discard(task_id)

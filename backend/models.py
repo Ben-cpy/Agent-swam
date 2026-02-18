@@ -121,6 +121,7 @@ class Run(Base):
     error_class = Column(SQLEnum(ErrorClass), nullable=True)
     log_blob = Column(Text, nullable=True)  # M1: store as text
     usage_json = Column(Text, nullable=True)  # M3: usage metrics JSON
+    tmux_session = Column(String(200), nullable=True)  # Feat3: tmux session name for SSH workspaces
 
     # Relationships
     task = relationship("Task", back_populates="runs", foreign_keys=[task_id])

@@ -4,8 +4,8 @@ import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import axios from 'axios';
-import { taskAPI } from '@/lib/api';
-import { ApiErrorBody, BackendType, TaskStatus } from '@/lib/types';
+import { taskAPI, workspaceAPI } from '@/lib/api';
+import { ApiErrorBody, BackendType, TaskStatus, WorkspaceType } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -39,6 +39,18 @@ export default function TaskDetailPage() {
     }
   );
   const task = data?.data ?? null;
+
+  // Fetch all workspaces to determine workspace type for the current task
+  const { data: workspacesData } = useSWR(
+    '/workspaces',
+    () => workspaceAPI.list(),
+    { revalidateOnFocus: false }
+  );
+  const workspaces = workspacesData?.data ?? [];
+  const taskWorkspace = task ? workspaces.find((w) => w.workspace_id === task.workspace_id) : null;
+  const isSSHWorkspace =
+    taskWorkspace?.workspace_type === WorkspaceType.SSH ||
+    taskWorkspace?.workspace_type === WorkspaceType.SSH_CONTAINER;
 
   const handleCancel = async () => {
     if (!confirm('Are you sure you want to cancel this task?')) {
@@ -131,6 +143,14 @@ export default function TaskDetailPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          {isSSHWorkspace && (
+            <Button
+              variant="outline"
+              onClick={() => router.push(`/tasks/${taskId}/terminal`)}
+            >
+              Open Terminal
+            </Button>
+          )}
           {task.status === TaskStatus.RUNNING && (
             <Button
               variant="destructive"
