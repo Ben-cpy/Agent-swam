@@ -3,12 +3,9 @@ import {
   ApiMessage,
   LogEntry,
   NextTaskNumber,
-  QuotaState,
-  Runner,
   Task,
   TaskCreateInput,
   TaskStatus,
-  UsageData,
   Workspace,
   WorkspaceCreateInput,
 } from './types';
@@ -53,11 +50,6 @@ export const workspaceAPI = {
   create: (data: WorkspaceCreateInput) => apiClient.post<Workspace>('/workspaces', data),
 };
 
-// Runner APIs
-export const runnerAPI = {
-  list: () => apiClient.get<Runner[]>('/runners'),
-};
-
 // Log APIs
 export const logAPI = {
   get: (runId: number) =>
@@ -65,16 +57,4 @@ export const logAPI = {
 
   streamURL: (runId: number) =>
     `${NORMALIZED_API_BASE}/logs/${runId}/stream`,
-};
-
-// Quota APIs
-export const quotaAPI = {
-  list: () => apiClient.get<QuotaState[]>('/quota'),
-  reset: (provider: string) =>
-    apiClient.post<ApiMessage>(`/quota/${provider}/reset`),
-};
-
-// Usage APIs
-export const usageAPI = {
-  get: () => apiClient.get<UsageData>('/usage'),
 };

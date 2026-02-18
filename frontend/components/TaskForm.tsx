@@ -30,6 +30,7 @@ export default function TaskForm() {
     prompt: '',
     workspace_id: '',
     backend: BackendType.CLAUDE_CODE,
+    branch_name: '',
   });
 
   const [errors, setErrors] = useState({
@@ -112,6 +113,7 @@ export default function TaskForm() {
         prompt: formData.prompt,
         workspace_id: parseInt(formData.workspace_id),
         backend: formData.backend,
+        branch_name: formData.branch_name.trim() || undefined,
       });
 
       // Redirect to task board
@@ -267,6 +269,21 @@ export default function TaskForm() {
                 <span>Codex CLI</span>
               </label>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="branch_name">Base Branch (optional)</Label>
+            <Input
+              id="branch_name"
+              value={formData.branch_name}
+              onChange={(e) =>
+                setFormData({ ...formData, branch_name: e.target.value })
+              }
+              placeholder="Auto-detected if empty"
+            />
+            <p className="text-xs text-muted-foreground">
+              Leave empty to auto-detect from workspace current branch.
+            </p>
           </div>
 
           {/* Submit Button */}

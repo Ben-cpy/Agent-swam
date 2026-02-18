@@ -3,8 +3,8 @@
 import { useMemo, useState } from 'react';
 import axios from 'axios';
 import useSWR from 'swr';
-import { runnerAPI, workspaceAPI } from '@/lib/api';
-import { ApiErrorBody, Runner, Workspace, WorkspaceCreateInput, WorkspaceType } from '@/lib/types';
+import { workspaceAPI } from '@/lib/api';
+import { ApiErrorBody, Workspace, WorkspaceCreateInput, WorkspaceType } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,7 +22,6 @@ type FormState = {
   display_name: string;
   workspace_type: WorkspaceType;
   path: string;
-  runner_id: string;
   host: string;
   port: string;
   ssh_user: string;
@@ -33,7 +32,6 @@ const initialForm: FormState = {
   display_name: '',
   workspace_type: WorkspaceType.LOCAL,
   path: '',
-  runner_id: '',
   host: '',
   port: '22',
   ssh_user: '',
@@ -71,20 +69,10 @@ export default function WorkspaceManager() {
     revalidateOnFocus: true,
   });
 
-  const {
-    data: runnerData,
-    error: runnerError,
-    isLoading: runnerLoading,
-  } = useSWR('/runners', () => runnerAPI.list(), {
-    refreshInterval: 10000,
-    revalidateOnFocus: true,
-  });
-
   const workspaces: Workspace[] = wsData?.data ?? [];
-  const runners: Runner[] = runnerData?.data ?? [];
 
   const canSubmit = useMemo(() => {
-    if (!form.display_name.trim() || !form.path.trim() || !form.runner_id) return false;
+    if (!form.display_name.trim() || !form.path.trim()) return false;
     if (form.workspace_type === WorkspaceType.LOCAL) return true;
     if (!form.host.trim()) return false;
     if (form.workspace_type === WorkspaceType.SSH_CONTAINER && !form.container_name.trim()) return false;
@@ -115,7 +103,6 @@ export default function WorkspaceManager() {
       display_name: form.display_name.trim(),
       workspace_type: form.workspace_type,
       path: form.path.trim(),
-      runner_id: parseInt(form.runner_id, 10),
       port: parseInt(form.port || '22', 10),
     };
 
@@ -133,10 +120,7 @@ export default function WorkspaceManager() {
     try {
       await workspaceAPI.create(payload);
       await mutateWorkspaces();
-      setForm((prev) => ({
-        ...initialForm,
-        runner_id: prev.runner_id || (runners[0]?.runner_id?.toString() ?? ''),
-      }));
+      setForm(initialForm);
     } catch (err: unknown) {
       if (axios.isAxiosError<ApiErrorBody>(err)) {
         setError(err.response?.data?.detail || err.message || 'Failed to create workspace');
@@ -164,35 +148,13 @@ export default function WorkspaceManager() {
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Display Name</Label>
-                <Input
-                  value={form.display_name}
-                  onChange={(e) => setForm((prev) => ({ ...prev, display_name: e.target.value }))}
-                  placeholder="e.g. Local AI Workspace"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Runner</Label>
-                <Select
-                  value={form.runner_id}
-                  onValueChange={(v) => setForm((prev) => ({ ...prev, runner_id: v }))}
-                  disabled={runnerLoading || runners.length === 0}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={runnerLoading ? 'Loading runners...' : 'Select runner'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {runners.map((runner) => (
-                      <SelectItem key={runner.runner_id} value={runner.runner_id.toString()}>
-                        Runner #{runner.runner_id} ({runner.env})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2">
+              <Label>Display Name</Label>
+              <Input
+                value={form.display_name}
+                onChange={(e) => setForm((prev) => ({ ...prev, display_name: e.target.value }))}
+                placeholder="e.g. Local AI Workspace"
+              />
             </div>
 
             <div className="space-y-2">
@@ -264,14 +226,9 @@ export default function WorkspaceManager() {
             )}
 
             <div className="flex gap-3">
-              <Button type="submit" disabled={!canSubmit || submitting || runners.length === 0}>
+              <Button type="submit" disabled={!canSubmit || submitting}>
                 {submitting ? 'Creating...' : 'Add Workspace'}
               </Button>
-              {runners.length === 0 && (
-                <p className="text-sm text-muted-foreground self-center">
-                  No runner available. Start backend first.
-                </p>
-              )}
             </div>
           </form>
         </CardContent>
@@ -282,7 +239,7 @@ export default function WorkspaceManager() {
           <CardTitle>Registered Workspaces</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {(wsError || runnerError) && (
+          {wsError && (
             <div className="text-sm text-red-600">
               Failed to load workspace data.
             </div>
@@ -302,7 +259,6 @@ export default function WorkspaceManager() {
                 <div className="font-medium">{ws.display_name}</div>
                 <div className="flex gap-2">
                   <Badge variant="outline">{getWorkspaceTypeLabel(ws.workspace_type)}</Badge>
-                  <Badge variant="outline">Runner #{ws.runner_id}</Badge>
                 </div>
               </div>
               <div className="text-sm text-muted-foreground break-all">

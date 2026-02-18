@@ -58,12 +58,21 @@ async def create_workspace(
     if existing:
         raise HTTPException(status_code=400, detail="Workspace with this path already exists")
 
-    runner_result = await db.execute(
-        select(Runner).where(Runner.runner_id == workspace.runner_id)
-    )
-    runner = runner_result.scalar_one_or_none()
-    if not runner:
-        raise HTTPException(status_code=400, detail="Runner not found")
+    runner = None
+    if workspace.runner_id is not None:
+        runner_result = await db.execute(
+            select(Runner).where(Runner.runner_id == workspace.runner_id)
+        )
+        runner = runner_result.scalar_one_or_none()
+        if not runner:
+            raise HTTPException(status_code=400, detail="Runner not found")
+    else:
+        runner_result = await db.execute(
+            select(Runner).order_by(Runner.runner_id.asc())
+        )
+        runner = runner_result.scalars().first()
+        if not runner:
+            raise HTTPException(status_code=400, detail="No runner available")
 
     new_workspace = Workspace(
         path=canonical_path,
@@ -73,7 +82,7 @@ async def create_workspace(
         port=workspace.port,
         ssh_user=workspace.ssh_user,
         container_name=workspace.container_name,
-        runner_id=workspace.runner_id,
+        runner_id=runner.runner_id,
         concurrency_limit=1  # M1: fixed to 1
     )
 

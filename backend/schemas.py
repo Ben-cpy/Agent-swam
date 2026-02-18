@@ -10,6 +10,7 @@ class TaskBase(BaseModel):
     prompt: str
     workspace_id: int
     backend: BackendType
+    branch_name: Optional[str] = Field(None, max_length=200)
 
 
 class TaskCreate(TaskBase):
@@ -27,6 +28,7 @@ class TaskResponse(TaskBase):
     created_at: datetime
     updated_at: datetime
     run_id: Optional[int] = None
+    worktree_path: Optional[str] = None
 
     class Config:
         orm_mode = True
@@ -44,7 +46,7 @@ class WorkspaceBase(BaseModel):
 
 
 class WorkspaceCreate(WorkspaceBase):
-    runner_id: int
+    runner_id: Optional[int] = None
 
 
 class WorkspaceResponse(WorkspaceBase):

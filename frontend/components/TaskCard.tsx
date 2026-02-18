@@ -15,11 +15,11 @@ export default function TaskCard({ task }: TaskCardProps) {
   const getBackendIcon = (backend: BackendType) => {
     switch (backend) {
       case BackendType.CLAUDE_CODE:
-        return '🤖';
+        return 'CC';
       case BackendType.CODEX_CLI:
-        return '⚡';
+        return 'CX';
       default:
-        return '🔧';
+        return 'AI';
     }
   };
 
@@ -36,18 +36,18 @@ export default function TaskCard({ task }: TaskCardProps) {
 
   return (
     <Link href={`/tasks/${task.id}`}>
-      <Card className="hover:shadow-md transition-shadow cursor-pointer">
-        <CardHeader className="pb-3">
+      <Card className="py-3 hover:shadow-md transition-shadow cursor-pointer">
+        <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
             <CardTitle className="text-sm font-medium line-clamp-2">
               {task.title}
             </CardTitle>
-            <span className="text-lg flex-shrink-0">
+            <span className="text-xs font-semibold rounded border px-2 py-1 flex-shrink-0">
               {getBackendIcon(task.backend)}
             </span>
           </div>
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent className="pt-0 space-y-1">
           <Badge variant="outline" className="text-xs">
             {getBackendLabel(task.backend)}
           </Badge>

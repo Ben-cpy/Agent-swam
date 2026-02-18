@@ -12,8 +12,6 @@ const statusColumns = [
   { status: TaskStatus.RUNNING, label: 'Running', bgColor: 'bg-blue-100' },
   { status: TaskStatus.DONE, label: 'Done', bgColor: 'bg-green-100' },
   { status: TaskStatus.FAILED, label: 'Failed', bgColor: 'bg-red-100' },
-  { status: TaskStatus.FAILED_QUOTA, label: 'Quota Exceeded', bgColor: 'bg-orange-100' },
-  { status: TaskStatus.CANCELLED, label: 'Cancelled', bgColor: 'bg-gray-100' },
 ];
 
 export default function TaskBoard({ tasks }: TaskBoardProps) {
@@ -23,12 +21,14 @@ export default function TaskBoard({ tasks }: TaskBoardProps) {
       [TaskStatus.RUNNING]: [],
       [TaskStatus.DONE]: [],
       [TaskStatus.FAILED]: [],
-      [TaskStatus.FAILED_QUOTA]: [],
-      [TaskStatus.CANCELLED]: [],
     };
 
     tasks.forEach((task) => {
-      grouped[task.status].push(task);
+      if (grouped[task.status]) {
+        grouped[task.status].push(task);
+      } else {
+        grouped[TaskStatus.FAILED].push(task);
+      }
     });
 
     return grouped;
@@ -37,7 +37,7 @@ export default function TaskBoard({ tasks }: TaskBoardProps) {
   const groupedTasks = groupTasksByStatus(tasks);
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       {statusColumns.map((column) => {
         const columnTasks = groupedTasks[column.status];
         return (
@@ -53,7 +53,7 @@ export default function TaskBoard({ tasks }: TaskBoardProps) {
             </div>
 
             {/* Column Content */}
-            <div className="flex-1 bg-slate-50 rounded-b-lg p-3 space-y-3 min-h-[200px]">
+            <div className="flex-1 bg-slate-50 rounded-b-lg p-3 space-y-5 min-h-[200px]">
               {columnTasks.length === 0 ? (
                 <div className="text-center text-sm text-muted-foreground py-8">
                   No tasks

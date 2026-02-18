@@ -5,6 +5,7 @@ import uvicorn
 import logging
 import sys
 import os
+from sqlalchemy import text
 
 # Fix Windows console encoding for Unicode characters
 if sys.platform == 'win32':
@@ -23,9 +24,7 @@ from config import settings
 from database import init_db, close_db, async_session_maker
 from runner.agent import LocalRunnerAgent
 from core.scheduler import TaskScheduler, RunnerHeartbeat
-from api import tasks, workspaces, runners, logs, quota, usage
-from models import QuotaState, QuotaStateValue
-from sqlalchemy import select
+from api import tasks, workspaces, logs
 
 # Configure logging
 logging.basicConfig(
@@ -45,26 +44,21 @@ async def lifespan(app: FastAPI):
     # Initialize database
     await init_db()
 
+    async with async_session_maker() as db:
+        result = await db.execute(
+            text(
+                "UPDATE tasks SET status = 'FAILED' "
+                "WHERE status IN ('FAILED_QUOTA', 'CANCELLED')"
+            )
+        )
+        await db.commit()
+        migrated = result.rowcount or 0
+        if migrated > 0:
+            logger.info("Migrated %s tasks from legacy statuses to FAILED", migrated)
+
     # Register local runner
     async with async_session_maker() as db:
         await LocalRunnerAgent.register_local_runner(db)
-
-    # M3: Seed default quota states
-    async with async_session_maker() as db:
-        for provider in ["claude", "openai"]:
-            result = await db.execute(
-                select(QuotaState).where(
-                    QuotaState.provider == provider,
-                    QuotaState.account_label == "default",
-                )
-            )
-            if not result.scalar_one_or_none():
-                db.add(QuotaState(
-                    provider=provider,
-                    account_label="default",
-                    state=QuotaStateValue.OK,
-                ))
-        await db.commit()
 
     # Start scheduler and heartbeat
     scheduler = TaskScheduler(async_session_maker)
@@ -108,10 +102,7 @@ app.add_middleware(
 # Include routers
 app.include_router(tasks.router)
 app.include_router(workspaces.router)
-app.include_router(runners.router)
 app.include_router(logs.router)
-app.include_router(quota.router)
-app.include_router(usage.router)
 
 
 @app.get("/")

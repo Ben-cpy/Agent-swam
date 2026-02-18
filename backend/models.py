@@ -10,8 +10,6 @@ class TaskStatus(str, enum.Enum):
     RUNNING = "RUNNING"
     DONE = "DONE"
     FAILED = "FAILED"
-    FAILED_QUOTA = "FAILED_QUOTA"
-    CANCELLED = "CANCELLED"
 
 
 class BackendType(str, enum.Enum):
@@ -56,6 +54,8 @@ class Task(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     run_id = Column(Integer, ForeignKey("runs.run_id"), nullable=True)
+    branch_name = Column(String(200), nullable=True)
+    worktree_path = Column(String(1000), nullable=True)
 
     # Relationships
     workspace = relationship("Workspace", back_populates="tasks")

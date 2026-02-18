@@ -126,7 +126,7 @@ class CodexAdapter(BackendAdapter):
 
         0 = success
         1 = general error
-        130 = user interrupt, mapped by executor to CANCELLED status
+        130 = user interrupt, mapped by executor to FAILED status
         Other = system error
         """
         if return_code == 0:

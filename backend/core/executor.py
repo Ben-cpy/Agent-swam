@@ -1,64 +1,94 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from models import Task, Workspace, Runner, Run, TaskStatus, ErrorClass, WorkspaceType, QuotaState, QuotaStateValue
-from core.backends import ClaudeCodeAdapter, CodexAdapter
-from datetime import datetime, timezone
 import asyncio
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Optional
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.backends import ClaudeCodeAdapter, CodexAdapter
+from models import ErrorClass, Run, Runner, Task, TaskStatus, Workspace, WorkspaceType
 
 logger = logging.getLogger(__name__)
 
 
-def _backend_to_provider(backend: str) -> str:
-    return {"claude_code": "claude", "codex_cli": "openai"}.get(backend, backend)
-
-
 class TaskExecutor:
-    """Executes tasks using the appropriate backend adapter"""
+    """Executes tasks using the appropriate backend adapter."""
 
-    # Tracks running tasks that were requested to cancel.
     _cancelled_task_ids: set[int] = set()
 
     def __init__(self, db_session_maker):
         self.db_session_maker = db_session_maker
 
-    async def execute_task(self, task_id: int, db: Optional[AsyncSession] = None) -> bool:
-        """
-        Execute a task by ID.
+    async def _detect_current_branch(self, workspace_path: str) -> str:
+        cmd = ["git", "-C", workspace_path, "rev-parse", "--abbrev-ref", "HEAD"]
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            raise RuntimeError(f"Failed to detect branch: {stderr.decode(errors='replace').strip()}")
+        branch = stdout.decode(errors="replace").strip()
+        if not branch:
+            raise RuntimeError("Failed to detect branch: empty output")
+        return branch
 
-        Returns:
-            bool: True if execution started successfully, False otherwise
-        """
+    async def _create_worktree(self, task_id: int, workspace_path: str, base_branch: str) -> str:
+        worktree_path = f"{workspace_path}-task-{task_id}"
+        worktree_branch = f"task-{task_id}"
+        cmd = [
+            "git",
+            "-C",
+            workspace_path,
+            "worktree",
+            "add",
+            "-b",
+            worktree_branch,
+            worktree_path,
+            base_branch,
+        ]
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            raise RuntimeError(f"Failed to create worktree: {stderr.decode(errors='replace').strip()}")
+        logger.info(
+            "Created worktree for task %s at %s from base branch %s",
+            task_id,
+            worktree_path,
+            base_branch,
+        )
+        return worktree_path
+
+    async def execute_task(self, task_id: int, db: Optional[AsyncSession] = None) -> bool:
         if db is None:
             async with self.db_session_maker() as session:
                 return await self._execute_task_with_db(task_id, session)
         return await self._execute_task_with_db(task_id, db)
 
     async def _execute_task_with_db(self, task_id: int, db: AsyncSession) -> bool:
-        # Fetch task with workspace
-        result = await db.execute(
-            select(Task).where(Task.id == task_id)
-        )
-        task = result.scalar_one_or_none()
-
+        task_result = await db.execute(select(Task).where(Task.id == task_id))
+        task = task_result.scalar_one_or_none()
         if not task:
-            logger.error(f"Task {task_id} not found")
+            logger.error("Task %s not found", task_id)
             return False
 
         if task.status != TaskStatus.TODO:
-            logger.warning(f"Task {task_id} is not in TODO status: {task.status}")
+            logger.warning("Task %s is not in TODO status: %s", task_id, task.status)
             return False
 
-        # Fetch workspace
-        result = await db.execute(
+        workspace_result = await db.execute(
             select(Workspace).where(Workspace.workspace_id == task.workspace_id)
         )
-        workspace = result.scalar_one_or_none()
-
+        workspace = workspace_result.scalar_one_or_none()
         if not workspace:
-            logger.error(f"Workspace {task.workspace_id} not found")
+            logger.error("Workspace %s not found", task.workspace_id)
             return False
 
         if workspace.workspace_type != WorkspaceType.LOCAL:
@@ -72,45 +102,70 @@ class TaskExecutor:
             )
             return False
 
-        # Fetch runner
-        result = await db.execute(
+        runner_result = await db.execute(
             select(Runner).where(Runner.runner_id == workspace.runner_id)
         )
-        runner = result.scalar_one_or_none()
-
+        runner = runner_result.scalar_one_or_none()
         if not runner:
-            logger.error(f"Runner {workspace.runner_id} not found")
+            logger.error("Runner %s not found", workspace.runner_id)
             return False
 
-        # Create run record
+        if not task.branch_name:
+            try:
+                task.branch_name = await self._detect_current_branch(workspace.path)
+                logger.info("Auto-detected base branch '%s' for task %s", task.branch_name, task_id)
+            except Exception as exc:
+                task.branch_name = "main"
+                logger.warning(
+                    "Failed to auto-detect base branch for task %s, fallback to 'main': %s",
+                    task_id,
+                    exc,
+                )
+            task.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+
+        try:
+            worktree_path = await self._create_worktree(task_id, workspace.path, task.branch_name)
+            task.worktree_path = worktree_path
+            task.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+        except Exception as exc:
+            task.status = TaskStatus.FAILED
+            task.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+            logger.error("Task %s failed before execution due to worktree error: %s", task_id, exc)
+            return False
+
         run = Run(
             task_id=task.id,
             runner_id=runner.runner_id,
             backend=task.backend.value,
-            started_at=datetime.now(timezone.utc)
+            started_at=datetime.now(timezone.utc),
         )
         db.add(run)
         await db.flush()
 
-        # Update task status
         task.status = TaskStatus.RUNNING
         task.run_id = run.run_id
         task.updated_at = datetime.now(timezone.utc)
         await db.commit()
 
-        logger.info(f"Starting task {task_id} with backend {task.backend} in workspace {workspace.path}")
+        logger.info(
+            "Starting task %s with backend %s in worktree %s",
+            task_id,
+            task.backend,
+            task.worktree_path,
+        )
 
-        # Execute asynchronously without blocking request/scheduler session.
         asyncio.create_task(
             self._run_task(
                 task_id=task.id,
                 run_id=run.run_id,
-                workspace_path=workspace.path,
+                workspace_path=task.worktree_path or workspace.path,
                 backend=task.backend.value,
                 prompt=task.prompt,
             )
         )
-
         return True
 
     async def _run_task(
@@ -121,12 +176,7 @@ class TaskExecutor:
         backend: str,
         prompt: str,
     ):
-        """
-        Internal method to run the task execution.
-        This runs in a background task with its own DB sessions.
-        """
         try:
-            # Select adapter
             if backend == "claude_code":
                 adapter = ClaudeCodeAdapter(workspace_path)
             elif backend == "codex_cli":
@@ -134,7 +184,6 @@ class TaskExecutor:
             else:
                 raise ValueError(f"Unknown backend: {backend}")
 
-            # Execute and collect logs
             log_lines = []
             exit_code = None
 
@@ -143,29 +192,17 @@ class TaskExecutor:
                 should_terminate=lambda: self._is_task_marked_cancelled(task_id),
             ):
                 log_lines.append(line)
-
-                # Parse exit code from final line
                 if "[Process exited with code" in line:
                     try:
                         exit_code = int(line.split("code ")[1].split("]")[0])
                     except Exception:
                         pass
 
-            # If exit code not found, assume failure
             if exit_code is None:
                 exit_code = 1
 
-            # Determine success and error class
             success, error_class_str = adapter.parse_exit_code(exit_code)
-            was_cancelled = (
-                exit_code == 130
-                or self._is_task_marked_cancelled(task_id)
-                or await self._is_task_cancelled_in_db(task_id)
-            )
-
-            # M3: read usage and quota state from adapter
-            usage_data = adapter.usage_data
-            is_quota_error = adapter.is_quota_error
+            was_cancelled = exit_code == 130 or self._is_task_marked_cancelled(task_id)
 
             await self._persist_execution_result(
                 task_id=task_id,
@@ -175,14 +212,12 @@ class TaskExecutor:
                 error_class_str=error_class_str,
                 log_blob="".join(log_lines),
                 was_cancelled=was_cancelled,
-                usage_data=usage_data,
-                is_quota_error=is_quota_error,
-                backend=backend,
+                usage_data=adapter.usage_data,
+                is_quota_error=adapter.is_quota_error,
             )
-
-        except Exception as e:
-            logger.error(f"Error executing task {task_id}: {e}", exc_info=True)
-            await self._persist_internal_error(task_id, run_id, str(e))
+        except Exception as exc:
+            logger.error("Error executing task %s: %s", task_id, exc, exc_info=True)
+            await self._persist_internal_error(task_id, run_id, str(exc))
         finally:
             self._cancelled_task_ids.discard(task_id)
 
@@ -197,35 +232,28 @@ class TaskExecutor:
         was_cancelled: bool,
         usage_data: Optional[dict] = None,
         is_quota_error: bool = False,
-        backend: Optional[str] = None,
     ):
         async with self.db_session_maker() as db:
             task_result = await db.execute(select(Task).where(Task.id == task_id))
             task = task_result.scalar_one_or_none()
             run_result = await db.execute(select(Run).where(Run.run_id == run_id))
             run = run_result.scalar_one_or_none()
-
             if not task or not run:
-                logger.error(f"Task/run not found while persisting result (task={task_id}, run={run_id})")
+                logger.error("Task/run not found while persisting result (task=%s, run=%s)", task_id, run_id)
                 return
 
             run.ended_at = datetime.now(timezone.utc)
-
-            # M3: persist usage data
             if usage_data:
                 run.usage_json = json.dumps(usage_data)
 
             if was_cancelled:
                 run.exit_code = 130
                 run.error_class = ErrorClass.UNKNOWN
-                task.status = TaskStatus.CANCELLED
+                task.status = TaskStatus.FAILED
             elif is_quota_error:
-                # M3: quota error handling
                 run.exit_code = exit_code
                 run.error_class = ErrorClass.QUOTA
-                task.status = TaskStatus.FAILED_QUOTA
-                logger.warning(f"Task {task_id} failed due to quota exhaustion")
-                await self._set_quota_exhausted(db, backend)
+                task.status = TaskStatus.FAILED
             else:
                 run.exit_code = exit_code
                 if success:
@@ -243,34 +271,7 @@ class TaskExecutor:
 
             task.updated_at = datetime.now(timezone.utc)
             await db.commit()
-            logger.info(f"Task {task_id} completed with status {task.status}")
-
-    async def _set_quota_exhausted(self, db: AsyncSession, backend: Optional[str]):
-        """Mark the provider as QUOTA_EXHAUSTED in the quota_states table."""
-        if not backend:
-            return
-        provider = _backend_to_provider(backend)
-        result = await db.execute(
-            select(QuotaState).where(
-                QuotaState.provider == provider,
-                QuotaState.account_label == "default",
-            )
-        )
-        qs = result.scalar_one_or_none()
-        if qs:
-            qs.state = QuotaStateValue.QUOTA_EXHAUSTED
-            qs.last_event_at = datetime.now(timezone.utc)
-            qs.note = "Auto-detected quota exhaustion"
-        else:
-            qs = QuotaState(
-                provider=provider,
-                account_label="default",
-                state=QuotaStateValue.QUOTA_EXHAUSTED,
-                last_event_at=datetime.now(timezone.utc),
-                note="Auto-detected quota exhaustion",
-            )
-            db.add(qs)
-        logger.warning(f"Provider {provider} marked as QUOTA_EXHAUSTED")
+            logger.info("Task %s completed with status %s", task_id, task.status)
 
     async def _persist_internal_error(self, task_id: int, run_id: int, error_msg: str):
         async with self.db_session_maker() as db:
@@ -281,51 +282,28 @@ class TaskExecutor:
             if not task or not run:
                 return
 
-            was_cancelled = task.status == TaskStatus.CANCELLED
+            was_cancelled = self._is_task_marked_cancelled(task_id)
             run.ended_at = datetime.now(timezone.utc)
             run.exit_code = 130 if was_cancelled else -1
             run.error_class = ErrorClass.UNKNOWN
             run.log_blob = f"Internal error: {error_msg}"
 
-            if was_cancelled:
-                task.status = TaskStatus.CANCELLED
-            else:
-                task.status = TaskStatus.FAILED
-
+            task.status = TaskStatus.FAILED
             task.updated_at = datetime.now(timezone.utc)
             await db.commit()
-
-    async def _is_task_cancelled_in_db(self, task_id: int) -> bool:
-        async with self.db_session_maker() as db:
-            result = await db.execute(
-                select(Task.status).where(Task.id == task_id)
-            )
-            status = result.scalar_one_or_none()
-            return status == TaskStatus.CANCELLED
 
     def _is_task_marked_cancelled(self, task_id: int) -> bool:
         return task_id in self._cancelled_task_ids
 
     async def cancel_task(self, task_id: int, db: Optional[AsyncSession] = None) -> bool:
-        """
-        Cancel a running task.
-
-        Marks task as CANCELLED and requests subprocess termination if running.
-
-        Returns:
-            bool: True if cancelled successfully
-        """
         if db is None:
             async with self.db_session_maker() as session:
                 return await self._cancel_task_with_db(task_id, session)
         return await self._cancel_task_with_db(task_id, db)
 
     async def _cancel_task_with_db(self, task_id: int, db: AsyncSession) -> bool:
-        result = await db.execute(
-            select(Task).where(Task.id == task_id)
-        )
+        result = await db.execute(select(Task).where(Task.id == task_id))
         task = result.scalar_one_or_none()
-
         if not task:
             return False
 
@@ -333,24 +311,20 @@ class TaskExecutor:
             return False
 
         was_running = task.status == TaskStatus.RUNNING
-        task.status = TaskStatus.CANCELLED
+        task.status = TaskStatus.FAILED
         task.updated_at = datetime.now(timezone.utc)
 
         if was_running:
             self._cancelled_task_ids.add(task.id)
 
-        # If there's a run, mark it as cancelled
         if task.run_id:
-            result = await db.execute(
-                select(Run).where(Run.run_id == task.run_id)
-            )
+            result = await db.execute(select(Run).where(Run.run_id == task.run_id))
             run = result.scalar_one_or_none()
             if run:
                 run.ended_at = datetime.now(timezone.utc)
-                run.exit_code = 130  # SIGINT
+                run.exit_code = 130
                 run.error_class = ErrorClass.UNKNOWN
 
         await db.commit()
-
-        logger.info(f"Task {task_id} cancelled")
+        logger.info("Task %s cancelled (mapped to FAILED)", task_id)
         return True

@@ -90,8 +90,6 @@ export default function TaskDetailPage() {
       [TaskStatus.RUNNING]: 'bg-blue-500 text-white',
       [TaskStatus.DONE]: 'bg-green-500 text-white',
       [TaskStatus.FAILED]: 'bg-red-500 text-white',
-      [TaskStatus.FAILED_QUOTA]: 'bg-orange-500 text-white',
-      [TaskStatus.CANCELLED]: 'bg-gray-400 text-white',
     };
     return <Badge className={classNames[status]}>{status}</Badge>;
   };
@@ -142,7 +140,7 @@ export default function TaskDetailPage() {
               Cancel Task
             </Button>
           )}
-          {(task.status === TaskStatus.FAILED || task.status === TaskStatus.FAILED_QUOTA) && (
+          {task.status === TaskStatus.FAILED && (
             <Button onClick={handleRetry} disabled={actionLoading}>
               Retry Task
             </Button>
@@ -179,6 +177,18 @@ export default function TaskDetailPage() {
               Workspace ID
             </label>
             <p className="mt-1">{task.workspace_id}</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-muted-foreground">
+              Base Branch
+            </label>
+            <p className="mt-1">{task.branch_name || '-'}</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-muted-foreground">
+              Worktree Path
+            </label>
+            <p className="mt-1 break-all">{task.worktree_path || '-'}</p>
           </div>
           <div>
             <label className="text-sm font-medium text-muted-foreground">

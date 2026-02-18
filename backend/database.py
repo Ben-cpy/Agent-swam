@@ -42,6 +42,13 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         if settings.database_url.startswith("sqlite"):
+            result_tasks = await conn.execute(text("PRAGMA table_info(tasks)"))
+            task_columns = {row[1] for row in result_tasks.fetchall()}
+            if "branch_name" not in task_columns:
+                await conn.execute(text("ALTER TABLE tasks ADD COLUMN branch_name VARCHAR(200)"))
+            if "worktree_path" not in task_columns:
+                await conn.execute(text("ALTER TABLE tasks ADD COLUMN worktree_path VARCHAR(1000)"))
+
             result = await conn.execute(text("PRAGMA table_info(workspaces)"))
             existing_columns = {row[1] for row in result.fetchall()}
 

@@ -113,7 +113,7 @@ class ClaudeCodeAdapter(BackendAdapter):
 
         0 = success
         1 = general error (could be CODE, TOOL, or UNKNOWN)
-        130 = user interrupt (SIGINT), mapped by executor to CANCELLED status
+        130 = user interrupt (SIGINT), mapped by executor to FAILED status
         Other = network or system error
         """
         if return_code == 0:
