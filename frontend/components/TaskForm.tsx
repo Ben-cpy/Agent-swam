@@ -23,6 +23,7 @@ export default function TaskForm() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [titleManuallyEdited, setTitleManuallyEdited] = useState(false);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -37,6 +38,17 @@ export default function TaskForm() {
     workspace_id: '',
   });
 
+  // Fetch suggested title when workspace changes
+  const fetchSuggestedTitle = async (workspaceId: string) => {
+    if (!workspaceId || titleManuallyEdited) return;
+    try {
+      const res = await taskAPI.nextNumber(parseInt(workspaceId));
+      setFormData((prev) => ({ ...prev, title: res.data.suggested_title }));
+    } catch {
+      // Silently ignore - title can still be entered manually
+    }
+  };
+
   // Fetch workspaces on mount
   useEffect(() => {
     workspaceAPI.list()
@@ -44,16 +56,19 @@ export default function TaskForm() {
         setWorkspaces(res.data);
         // Auto-select first workspace if available
         if (res.data.length > 0) {
+          const firstWsId = res.data[0].workspace_id.toString();
           setFormData((prev) => ({
             ...prev,
-            workspace_id: res.data[0].workspace_id.toString(),
+            workspace_id: firstWsId,
           }));
+          fetchSuggestedTitle(firstWsId);
         }
       })
       .catch((err) => {
         setError('Failed to load workspaces');
         console.error(err);
       });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const validate = () => {
@@ -152,9 +167,10 @@ export default function TaskForm() {
             <Input
               id="title"
               value={formData.title}
-              onChange={(e) =>
-                setFormData({ ...formData, title: e.target.value })
-              }
+              onChange={(e) => {
+                setTitleManuallyEdited(e.target.value !== '');
+                setFormData({ ...formData, title: e.target.value });
+              }}
               placeholder="e.g., Fix authentication bug"
               className={errors.title ? 'border-red-500' : ''}
             />
@@ -190,9 +206,10 @@ export default function TaskForm() {
             </Label>
             <Select
               value={formData.workspace_id}
-              onValueChange={(value) =>
-                setFormData({ ...formData, workspace_id: value })
-              }
+              onValueChange={(value) => {
+                setFormData({ ...formData, workspace_id: value });
+                fetchSuggestedTitle(value);
+              }}
             >
               <SelectTrigger className={errors.workspace_id ? 'border-red-500' : ''}>
                 <SelectValue placeholder="Select a workspace" />

@@ -12,6 +12,7 @@ export default function Navbar() {
     { href: '/workspaces', label: 'Workspaces' },
     { href: '/runners', label: 'Runners' },
     { href: '/quota', label: 'Quota' },
+    { href: '/usage', label: 'Usage' },
   ];
 
   return (

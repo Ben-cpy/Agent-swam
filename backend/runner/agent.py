@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from models import Runner, RunnerStatus
-from datetime import datetime
+from datetime import datetime, timezone
 from config import settings
 import logging
 
@@ -33,7 +33,7 @@ class LocalRunnerAgent:
         if runner:
             # Update existing runner
             runner.status = RunnerStatus.ONLINE
-            runner.heartbeat_at = datetime.utcnow()
+            runner.heartbeat_at = datetime.now(timezone.utc)
             runner.capabilities = ["claude_code", "codex_cli"]
             runner.max_parallel = settings.max_parallel
             logger.info(f"✓ Local runner updated (ID: {runner.runner_id})")
@@ -43,7 +43,7 @@ class LocalRunnerAgent:
                 env=settings.runner_env,
                 capabilities=["claude_code", "codex_cli"],
                 status=RunnerStatus.ONLINE,
-                heartbeat_at=datetime.utcnow(),
+                heartbeat_at=datetime.now(timezone.utc),
                 max_parallel=settings.max_parallel
             )
             db.add(runner)

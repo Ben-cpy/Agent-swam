@@ -4,6 +4,7 @@ import { Runner } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { formatDistanceToNow } from 'date-fns';
+import { parseUTCDate } from '@/lib/utils';
 
 interface RunnerCardProps {
   runner: Runner;
@@ -63,7 +64,7 @@ export default function RunnerCard({ runner }: RunnerCardProps) {
               Last Heartbeat
             </label>
             <p className="mt-1 text-sm">
-              {formatDistanceToNow(new Date(runner.heartbeat_at), {
+              {formatDistanceToNow(parseUTCDate(runner.heartbeat_at), {
                 addSuffix: true,
               })}
             </p>

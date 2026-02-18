@@ -4,7 +4,7 @@ Verification suite for M1 review fixes (issues 1-6).
 import asyncio
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -65,7 +65,7 @@ async def _seed_runner_and_workspace() -> Tuple[int, int]:
         runner = Runner(
             env="verify-env",
             capabilities=["codex_cli", "claude_code"],
-            heartbeat_at=datetime.utcnow(),
+            heartbeat_at=datetime.now(timezone.utc),
             status=RunnerStatus.ONLINE,
             max_parallel=1,
         )
@@ -142,8 +142,8 @@ async def _create_todo_task(workspace_id: int, title: str) -> int:
             workspace_id=workspace_id,
             backend=BackendType.CODEX_CLI,
             status=TaskStatus.TODO,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
         )
         db.add(task)
         await db.commit()

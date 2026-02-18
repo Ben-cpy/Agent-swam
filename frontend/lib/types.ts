@@ -108,3 +108,28 @@ export interface ApiMessage {
 export interface ApiErrorBody {
   detail?: string;
 }
+
+export interface NextTaskNumber {
+  next_number: number;
+  suggested_title: string;
+}
+
+export interface UsageWindow {
+  task_count: number;
+  total_cost_usd?: number;
+  total_tokens?: number;
+  window_start: string;
+  window_end: string;
+}
+
+export interface ProviderUsage {
+  '5h': UsageWindow;
+  weekly: UsageWindow;
+  quota_state: 'OK' | 'QUOTA_EXHAUSTED' | 'UNKNOWN';
+  last_quota_error: string | null;
+}
+
+export interface UsageData {
+  claude: ProviderUsage;
+  openai: ProviderUsage;
+}

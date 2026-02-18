@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Enum as SQLEnum, JSON
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import enum
 from database import Base
 
@@ -53,8 +53,8 @@ class Task(Base):
     workspace_id = Column(Integer, ForeignKey("workspaces.workspace_id"), nullable=False)
     backend = Column(SQLEnum(BackendType), nullable=False)
     status = Column(SQLEnum(TaskStatus), default=TaskStatus.TODO, nullable=False, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     run_id = Column(Integer, ForeignKey("runs.run_id"), nullable=True)
 
     # Relationships
@@ -98,7 +98,7 @@ class Runner(Base):
     runner_id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     env = Column(String(100), nullable=False)
     capabilities = Column(JSON, nullable=False)  # List of supported backends
-    heartbeat_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    heartbeat_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     status = Column(SQLEnum(RunnerStatus), default=RunnerStatus.ONLINE, nullable=False)
     max_parallel = Column(Integer, default=1, nullable=False)  # M1: fixed to 1
 
@@ -114,7 +114,7 @@ class Run(Base):
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
     runner_id = Column(Integer, ForeignKey("runners.runner_id"), nullable=False)
     backend = Column(String(50), nullable=False)
-    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     ended_at = Column(DateTime, nullable=True)
     exit_code = Column(Integer, nullable=True)
     error_class = Column(SQLEnum(ErrorClass), nullable=True)

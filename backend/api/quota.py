@@ -5,7 +5,7 @@ from database import get_db
 from models import QuotaState, QuotaStateValue
 from schemas import QuotaStateResponse
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/api/quota", tags=["quota"])
 
@@ -34,7 +34,7 @@ async def reset_quota(
         raise HTTPException(status_code=404, detail=f"Provider '{provider}' not found")
 
     qs.state = QuotaStateValue.OK
-    qs.last_event_at = datetime.utcnow()
+    qs.last_event_at = datetime.now(timezone.utc)
     qs.note = "Manually reset"
     await db.commit()
 

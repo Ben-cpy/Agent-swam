@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from models import Task, Workspace, Runner, Run, TaskStatus, ErrorClass, WorkspaceType, QuotaState, QuotaStateValue
 from core.backends import ClaudeCodeAdapter, CodexAdapter
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 import json
 import logging
@@ -63,7 +63,7 @@ class TaskExecutor:
 
         if workspace.workspace_type != WorkspaceType.LOCAL:
             task.status = TaskStatus.FAILED
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now(timezone.utc)
             await db.commit()
             logger.error(
                 "Workspace %s type %s is not executable yet (only local supported in current runner)",
@@ -87,7 +87,7 @@ class TaskExecutor:
             task_id=task.id,
             runner_id=runner.runner_id,
             backend=task.backend.value,
-            started_at=datetime.utcnow()
+            started_at=datetime.now(timezone.utc)
         )
         db.add(run)
         await db.flush()
@@ -95,7 +95,7 @@ class TaskExecutor:
         # Update task status
         task.status = TaskStatus.RUNNING
         task.run_id = run.run_id
-        task.updated_at = datetime.utcnow()
+        task.updated_at = datetime.now(timezone.utc)
         await db.commit()
 
         logger.info(f"Starting task {task_id} with backend {task.backend} in workspace {workspace.path}")
@@ -209,7 +209,7 @@ class TaskExecutor:
                 logger.error(f"Task/run not found while persisting result (task={task_id}, run={run_id})")
                 return
 
-            run.ended_at = datetime.utcnow()
+            run.ended_at = datetime.now(timezone.utc)
 
             # M3: persist usage data
             if usage_data:
@@ -241,7 +241,7 @@ class TaskExecutor:
             if log_blob:
                 run.log_blob = log_blob
 
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now(timezone.utc)
             await db.commit()
             logger.info(f"Task {task_id} completed with status {task.status}")
 
@@ -259,14 +259,14 @@ class TaskExecutor:
         qs = result.scalar_one_or_none()
         if qs:
             qs.state = QuotaStateValue.QUOTA_EXHAUSTED
-            qs.last_event_at = datetime.utcnow()
+            qs.last_event_at = datetime.now(timezone.utc)
             qs.note = "Auto-detected quota exhaustion"
         else:
             qs = QuotaState(
                 provider=provider,
                 account_label="default",
                 state=QuotaStateValue.QUOTA_EXHAUSTED,
-                last_event_at=datetime.utcnow(),
+                last_event_at=datetime.now(timezone.utc),
                 note="Auto-detected quota exhaustion",
             )
             db.add(qs)
@@ -282,7 +282,7 @@ class TaskExecutor:
                 return
 
             was_cancelled = task.status == TaskStatus.CANCELLED
-            run.ended_at = datetime.utcnow()
+            run.ended_at = datetime.now(timezone.utc)
             run.exit_code = 130 if was_cancelled else -1
             run.error_class = ErrorClass.UNKNOWN
             run.log_blob = f"Internal error: {error_msg}"
@@ -292,7 +292,7 @@ class TaskExecutor:
             else:
                 task.status = TaskStatus.FAILED
 
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now(timezone.utc)
             await db.commit()
 
     async def _is_task_cancelled_in_db(self, task_id: int) -> bool:
@@ -334,7 +334,7 @@ class TaskExecutor:
 
         was_running = task.status == TaskStatus.RUNNING
         task.status = TaskStatus.CANCELLED
-        task.updated_at = datetime.utcnow()
+        task.updated_at = datetime.now(timezone.utc)
 
         if was_running:
             self._cancelled_task_ids.add(task.id)
@@ -346,7 +346,7 @@ class TaskExecutor:
             )
             run = result.scalar_one_or_none()
             if run:
-                run.ended_at = datetime.utcnow()
+                run.ended_at = datetime.now(timezone.utc)
                 run.exit_code = 130  # SIGINT
                 run.error_class = ErrorClass.UNKNOWN
 

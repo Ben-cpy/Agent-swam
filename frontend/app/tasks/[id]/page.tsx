@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import LogStream from '@/components/LogStream';
 import { formatDistanceToNow } from 'date-fns';
+import { parseUTCDate } from '@/lib/utils';
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError<ApiErrorBody>(error)) {
@@ -128,7 +129,7 @@ export default function TaskDetailPage() {
           </div>
           <p className="text-muted-foreground">
             Task #{task.id} - Created{' '}
-            {formatDistanceToNow(new Date(task.created_at), { addSuffix: true })}
+            {formatDistanceToNow(parseUTCDate(task.created_at), { addSuffix: true })}
           </p>
         </div>
         <div className="flex gap-2">
@@ -193,7 +194,7 @@ export default function TaskDetailPage() {
                 Created At
               </label>
               <p className="mt-1 text-sm">
-                {new Date(task.created_at).toLocaleString()}
+                {parseUTCDate(task.created_at).toLocaleString()}
               </p>
             </div>
             <div>
@@ -201,7 +202,7 @@ export default function TaskDetailPage() {
                 Updated At
               </label>
               <p className="mt-1 text-sm">
-                {new Date(task.updated_at).toLocaleString()}
+                {parseUTCDate(task.updated_at).toLocaleString()}
               </p>
             </div>
           </div>

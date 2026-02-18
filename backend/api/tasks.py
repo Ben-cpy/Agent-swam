@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from typing import List, Optional
 from database import get_db, async_session_maker
 from models import Task, TaskStatus, Workspace, Run
-from schemas import TaskCreate, TaskResponse
+from schemas import TaskCreate, TaskResponse, NextTaskNumberResponse
 from core.executor import TaskExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -30,8 +30,8 @@ async def create_task(
         workspace_id=task.workspace_id,
         backend=task.backend,
         status=TaskStatus.TODO,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
     )
 
     db.add(new_task)
@@ -58,6 +58,31 @@ async def list_tasks(
     tasks = result.scalars().all()
 
     return tasks
+
+
+@router.get("/next-number", response_model=NextTaskNumberResponse)
+async def get_next_task_number(
+    workspace_id: int = Query(...),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get the next task number and suggested title for a workspace."""
+    workspace_result = await db.execute(
+        select(Workspace).where(Workspace.workspace_id == workspace_id)
+    )
+    workspace = workspace_result.scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=400, detail="Workspace not found")
+
+    count_result = await db.execute(
+        select(func.count(Task.id)).where(Task.workspace_id == workspace_id)
+    )
+    count = count_result.scalar() or 0
+    next_number = count + 1
+
+    return NextTaskNumberResponse(
+        next_number=next_number,
+        suggested_title=f"{workspace.display_name}-{next_number}"
+    )
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
@@ -119,8 +144,8 @@ async def retry_task(
         workspace_id=original_task.workspace_id,
         backend=original_task.backend,
         status=TaskStatus.TODO,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
     )
 
     db.add(new_task)

@@ -2,11 +2,13 @@ import axios from 'axios';
 import {
   ApiMessage,
   LogEntry,
+  NextTaskNumber,
   QuotaState,
   Runner,
   Task,
   TaskCreateInput,
   TaskStatus,
+  UsageData,
   Workspace,
   WorkspaceCreateInput,
 } from './types';
@@ -40,6 +42,9 @@ export const taskAPI = {
 
   delete: (id: number) =>
     apiClient.delete<ApiMessage>(`/tasks/${id}`),
+
+  nextNumber: (workspaceId: number) =>
+    apiClient.get<NextTaskNumber>('/tasks/next-number', { params: { workspace_id: workspaceId } }),
 };
 
 // Workspace APIs
@@ -67,4 +72,9 @@ export const quotaAPI = {
   list: () => apiClient.get<QuotaState[]>('/quota'),
   reset: (provider: string) =>
     apiClient.post<ApiMessage>(`/quota/${provider}/reset`),
+};
+
+// Usage APIs
+export const usageAPI = {
+  get: () => apiClient.get<UsageData>('/usage'),
 };

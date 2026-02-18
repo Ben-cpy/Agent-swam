@@ -5,6 +5,7 @@ import { Task, BackendType } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { formatDistanceToNow } from 'date-fns';
+import { parseUTCDate } from '@/lib/utils';
 
 interface TaskCardProps {
   task: Task;
@@ -51,7 +52,7 @@ export default function TaskCard({ task }: TaskCardProps) {
             {getBackendLabel(task.backend)}
           </Badge>
           <p className="text-xs text-muted-foreground">
-            {formatDistanceToNow(new Date(task.created_at), { addSuffix: true })}
+            {formatDistanceToNow(parseUTCDate(task.created_at), { addSuffix: true })}
           </p>
         </CardContent>
       </Card>

@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from models import Task, Workspace, Runner, TaskStatus, RunnerStatus, QuotaState, QuotaStateValue
 from core.executor import TaskExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from config import settings
 import asyncio
 import logging
@@ -213,10 +213,10 @@ class RunnerHeartbeat:
             runners = result.scalars().all()
 
             for runner in runners:
-                runner.heartbeat_at = datetime.utcnow()
+                runner.heartbeat_at = datetime.now(timezone.utc)
 
                 # Check if runner is offline (no heartbeat in 2x interval)
-                threshold = datetime.utcnow() - timedelta(seconds=settings.heartbeat_interval * 2)
+                threshold = datetime.now(timezone.utc) - timedelta(seconds=settings.heartbeat_interval * 2)
                 if runner.heartbeat_at < threshold:
                     runner.status = RunnerStatus.OFFLINE
                 else:

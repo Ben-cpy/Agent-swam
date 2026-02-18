@@ -124,3 +124,8 @@ class QuotaStateResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class NextTaskNumberResponse(BaseModel):
+    next_number: int
+    suggested_title: str

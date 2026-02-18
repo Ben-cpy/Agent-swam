@@ -6,7 +6,7 @@ from database import get_db
 from models import Run, Task, TaskStatus
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 
@@ -57,7 +57,7 @@ async def stream_logs(
                         "event": "log",
                         "data": json.dumps({
                             "run_id": run_id,
-                            "timestamp": datetime.utcnow().isoformat(),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
                             "content": new_content
                         })
                     }

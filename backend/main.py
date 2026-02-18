@@ -23,7 +23,7 @@ from config import settings
 from database import init_db, close_db, async_session_maker
 from runner.agent import LocalRunnerAgent
 from core.scheduler import TaskScheduler, RunnerHeartbeat
-from api import tasks, workspaces, runners, logs, quota
+from api import tasks, workspaces, runners, logs, quota, usage
 from models import QuotaState, QuotaStateValue
 from sqlalchemy import select
 
@@ -111,6 +111,7 @@ app.include_router(workspaces.router)
 app.include_router(runners.router)
 app.include_router(logs.router)
 app.include_router(quota.router)
+app.include_router(usage.router)
 
 
 @app.get("/")
