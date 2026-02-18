@@ -25,6 +25,7 @@ from database import init_db, close_db, async_session_maker
 from runner.agent import LocalRunnerAgent
 from core.scheduler import TaskScheduler, RunnerHeartbeat
 from api import tasks, workspaces, logs
+from api import models as models_api
 
 # Configure logging
 logging.basicConfig(
@@ -103,6 +104,7 @@ app.add_middleware(
 app.include_router(tasks.router)
 app.include_router(workspaces.router)
 app.include_router(logs.router)
+app.include_router(models_api.router)
 
 
 @app.get("/")

@@ -48,6 +48,8 @@ async def init_db():
                 await conn.execute(text("ALTER TABLE tasks ADD COLUMN branch_name VARCHAR(200)"))
             if "worktree_path" not in task_columns:
                 await conn.execute(text("ALTER TABLE tasks ADD COLUMN worktree_path VARCHAR(1000)"))
+            if "model" not in task_columns:
+                await conn.execute(text("ALTER TABLE tasks ADD COLUMN model VARCHAR(200)"))
 
             result = await conn.execute(text("PRAGMA table_info(workspaces)"))
             existing_columns = {row[1] for row in result.fetchall()}

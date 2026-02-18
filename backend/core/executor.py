@@ -164,6 +164,7 @@ class TaskExecutor:
                 workspace_path=task.worktree_path or workspace.path,
                 backend=task.backend.value,
                 prompt=task.prompt,
+                model=task.model,
             )
         )
         return True
@@ -175,12 +176,13 @@ class TaskExecutor:
         workspace_path: str,
         backend: str,
         prompt: str,
+        model: Optional[str] = None,
     ):
         try:
             if backend == "claude_code":
-                adapter = ClaudeCodeAdapter(workspace_path)
+                adapter = ClaudeCodeAdapter(workspace_path, model=model)
             elif backend == "codex_cli":
-                adapter = CodexAdapter(workspace_path)
+                adapter = CodexAdapter(workspace_path, model=model)
             else:
                 raise ValueError(f"Unknown backend: {backend}")
 
