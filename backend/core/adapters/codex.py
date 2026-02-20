@@ -63,12 +63,9 @@ class CodexAdapter(BackendAdapter):
         exit_code = 0
 
         async for line, code in self.run_subprocess(cmd, should_terminate=should_terminate):
-            if line.strip():
+            if line:
                 self._try_extract_from_jsonl(line)
-                # Try to parse JSONL and extract readable content
-                formatted_line = self._format_jsonl_line(line)
-                if formatted_line:
-                    yield formatted_line
+                yield line
             if code != 0:
                 exit_code = code
 

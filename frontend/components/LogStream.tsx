@@ -8,10 +8,18 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 // Structured log entry types
 // ---------------------------------------------------------------------------
 type LogEntry =
+  // Claude Code events
   | { type: 'text'; content: string }
   | { type: 'tool_use'; name: string }
   | { type: 'tool_result'; content: string }
   | { type: 'result'; subtype: string; content: string; isError: boolean }
+  // Codex events
+  | { type: 'codex_reasoning'; content: string }
+  | { type: 'codex_message'; content: string }
+  | { type: 'codex_command'; command: string; output: string; exitCode: number | null; isError: boolean }
+  | { type: 'codex_turn_divider' }
+  | { type: 'codex_error'; content: string }
+  // Common
   | { type: 'plain'; content: string };
 
 interface LogStreamProps {
@@ -75,6 +83,60 @@ function parseLine(line: string): LogEntry[] {
       const content = [obj.result, obj.error].filter(Boolean).join('\n');
       const isError = !!obj.error || obj.subtype === 'error';
       return [{ type: 'result', subtype: obj.subtype ?? '', content, isError }];
+    }
+
+    // ---- Codex JSONL events ----
+    if (type === 'thread.started') return [];
+
+    if (type === 'turn.started') return [{ type: 'codex_turn_divider' }];
+
+    if (type === 'turn.completed') return [{ type: 'codex_turn_divider' }];
+
+    if (type === 'message.text') {
+      const text = (obj.text as string | undefined)?.trim();
+      if (text) return [{ type: 'codex_message', content: text }];
+      return [];
+    }
+
+    if (type === 'tool.use') {
+      return [{ type: 'tool_use', name: (obj.name as string) ?? 'unknown' }];
+    }
+
+    if (type === 'item.started') return [];
+
+    if (type === 'item.completed' && obj.item) {
+      const item = obj.item as Record<string, unknown>;
+      const itemType = item.type as string;
+
+      if (itemType === 'reasoning') {
+        const text = (item.text as string | undefined)?.trim();
+        if (text) return [{ type: 'codex_reasoning', content: text }];
+        return [];
+      }
+
+      if (itemType === 'agent_message') {
+        const text = (item.text as string | undefined)?.trim();
+        if (text) return [{ type: 'codex_message', content: text }];
+        return [];
+      }
+
+      if (itemType === 'command_execution' && item.status === 'completed') {
+        const exitCode = (item.exit_code as number | null) ?? null;
+        return [{
+          type: 'codex_command',
+          command: (item.command as string) ?? '',
+          output: (item.aggregated_output as string) ?? '',
+          exitCode,
+          isError: exitCode != null && exitCode !== 0,
+        }];
+      }
+
+      return [];
+    }
+
+    if (type === 'error') {
+      const msg = (obj.message as string | undefined) ?? 'Unknown error';
+      return [{ type: 'codex_error', content: msg }];
     }
 
     // All other JSON events — suppress
@@ -161,6 +223,83 @@ function LogEntryView({ entry }: { entry: LogEntry }) {
             {entry.content}
           </pre>
         )}
+      </div>
+    );
+  }
+
+  if (entry.type === 'codex_reasoning') {
+    return (
+      <div className="mt-1 mb-1 pl-3 border-l-2 border-slate-700">
+        <span className="text-xs text-slate-500 italic font-mono whitespace-pre-wrap break-words leading-relaxed">
+          {entry.content}
+        </span>
+      </div>
+    );
+  }
+
+  if (entry.type === 'codex_message') {
+    return (
+      <div className="text-slate-50 text-sm mt-3 mb-1 whitespace-pre-wrap break-words leading-relaxed">
+        {entry.content}
+      </div>
+    );
+  }
+
+  if (entry.type === 'codex_command') {
+    const lines = entry.output.split('\n').filter(Boolean);
+    const COLLAPSE_THRESHOLD = 20;
+    const isLong = lines.length > COLLAPSE_THRESHOLD;
+    const displayed =
+      isLong && !expanded ? lines.slice(0, COLLAPSE_THRESHOLD).join('\n') : entry.output;
+
+    return (
+      <div className="mt-3 mb-2">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-slate-500 text-xs select-none">$</span>
+          <span className="text-cyan-300 text-xs font-mono bg-slate-800 px-2 py-0.5 rounded flex-1 truncate">
+            {entry.command}
+          </span>
+          {entry.exitCode != null && (
+            <span
+              className={`text-xs px-1.5 py-0.5 rounded font-mono ${
+                entry.isError
+                  ? 'bg-red-900/50 text-red-300'
+                  : 'bg-green-900/50 text-green-300'
+              }`}
+            >
+              exit {entry.exitCode}
+            </span>
+          )}
+        </div>
+        {entry.output && (
+          <div className="pl-3 border-l-2 border-slate-700">
+            <pre className="text-slate-400 text-xs whitespace-pre-wrap break-words leading-relaxed font-mono">
+              {displayed}
+            </pre>
+            {isLong && (
+              <button
+                onClick={() => setExpanded((v) => !v)}
+                className="text-xs text-slate-500 hover:text-slate-200 mt-1 transition-colors"
+              >
+                {expanded
+                  ? '▲ collapse'
+                  : `▼ ${lines.length - COLLAPSE_THRESHOLD} more lines`}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (entry.type === 'codex_turn_divider') {
+    return <div className="my-3 border-t border-slate-700/50" />;
+  }
+
+  if (entry.type === 'codex_error') {
+    return (
+      <div className="mt-2 p-2 rounded bg-red-950/60 border border-red-700 text-red-200 text-xs font-mono whitespace-pre-wrap break-words">
+        {entry.content}
       </div>
     );
   }
