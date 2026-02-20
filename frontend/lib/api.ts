@@ -24,8 +24,13 @@ export const apiClient = axios.create({
 
 // Task APIs
 export const taskAPI = {
-  list: (status?: TaskStatus) =>
-    apiClient.get<Task[]>('/tasks', { params: status ? { status } : {} }),
+  list: (params?: { status?: TaskStatus; workspaceId?: number }) =>
+    apiClient.get<Task[]>('/tasks', {
+      params: {
+        ...(params?.status ? { status: params.status } : {}),
+        ...(params?.workspaceId ? { workspace_id: params.workspaceId } : {}),
+      },
+    }),
 
   get: (id: number) =>
     apiClient.get<Task>(`/tasks/${id}`),
@@ -38,6 +43,9 @@ export const taskAPI = {
 
   retry: (id: number) =>
     apiClient.post<Task>(`/tasks/${id}/retry`),
+
+  continue: (id: number, data: { prompt: string; model?: string }) =>
+    apiClient.post<Task>(`/tasks/${id}/continue`, data),
 
   delete: (id: number) =>
     apiClient.delete<ApiMessage>(`/tasks/${id}`),

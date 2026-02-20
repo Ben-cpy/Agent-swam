@@ -1,6 +1,11 @@
 import TaskForm from '@/components/TaskForm';
 
-export default function NewTaskPage() {
+interface NewTaskPageProps {
+  searchParams: Promise<{ workspace_id?: string }>;
+}
+
+export default async function NewTaskPage({ searchParams }: NewTaskPageProps) {
+  const params = await searchParams;
   return (
     <div className="max-w-2xl mx-auto">
       <div className="mb-6">
@@ -9,7 +14,7 @@ export default function NewTaskPage() {
           Create a new AI task to execute
         </p>
       </div>
-      <TaskForm />
+      <TaskForm defaultWorkspaceId={params.workspace_id} />
     </div>
   );
 }

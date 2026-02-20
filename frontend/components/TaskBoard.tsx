@@ -5,6 +5,7 @@ import TaskCard from './TaskCard';
 
 interface TaskBoardProps {
   tasks: Task[];
+  workspaceId?: number;
   onTaskDeleted?: () => void;
 }
 
@@ -15,7 +16,10 @@ const statusColumns = [
   { status: TaskStatus.FAILED, label: 'Failed', bgColor: 'bg-red-100' },
 ];
 
-export default function TaskBoard({ tasks, onTaskDeleted }: TaskBoardProps) {
+export default function TaskBoard({ tasks, workspaceId, onTaskDeleted }: TaskBoardProps) {
+  const displayTasks = workspaceId
+    ? tasks.filter((t) => t.workspace_id === workspaceId)
+    : tasks;
   const groupTasksByStatus = (tasks: Task[]) => {
     const grouped: Record<TaskStatus, Task[]> = {
       [TaskStatus.TODO]: [],
@@ -35,7 +39,7 @@ export default function TaskBoard({ tasks, onTaskDeleted }: TaskBoardProps) {
     return grouped;
   };
 
-  const groupedTasks = groupTasksByStatus(tasks);
+  const groupedTasks = groupTasksByStatus(displayTasks);
 
   // Workspaces that currently have a RUNNING task — TODO tasks for these are "queued"
   const busyWorkspaceIds = new Set(

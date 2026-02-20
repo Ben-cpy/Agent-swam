@@ -163,17 +163,21 @@ class TaskExecutor:
             task.updated_at = datetime.now(timezone.utc)
             await db.commit()
 
-        try:
-            worktree_path = await self._create_worktree(task_id, workspace.path, task.branch_name)
-            task.worktree_path = worktree_path
-            task.updated_at = datetime.now(timezone.utc)
-            await db.commit()
-        except Exception as exc:
-            task.status = TaskStatus.FAILED
-            task.updated_at = datetime.now(timezone.utc)
-            await db.commit()
-            logger.error("Task %s failed before execution due to worktree error: %s", task_id, exc)
-            return False
+        if task.worktree_path:
+            # Continued task: reuse the existing worktree instead of creating a new one
+            logger.info("Reusing existing worktree %s for task %s", task.worktree_path, task_id)
+        else:
+            try:
+                worktree_path = await self._create_worktree(task_id, workspace.path, task.branch_name)
+                task.worktree_path = worktree_path
+                task.updated_at = datetime.now(timezone.utc)
+                await db.commit()
+            except Exception as exc:
+                task.status = TaskStatus.FAILED
+                task.updated_at = datetime.now(timezone.utc)
+                await db.commit()
+                logger.error("Task %s failed before execution due to worktree error: %s", task_id, exc)
+                return False
 
         run = Run(
             task_id=task.id,

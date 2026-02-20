@@ -145,3 +145,8 @@ class QuotaStateResponse(BaseModel):
 class NextTaskNumberResponse(BaseModel):
     next_number: int
     suggested_title: str
+
+
+class TaskContinueRequest(BaseModel):
+    prompt: str
+    model: Optional[str] = None

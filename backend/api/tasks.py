@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from database import get_db, async_session_maker
 from models import Task, TaskStatus, Workspace, WorkspaceType, Run
-from schemas import TaskCreate, TaskResponse, NextTaskNumberResponse
+from schemas import TaskCreate, TaskResponse, NextTaskNumberResponse, TaskContinueRequest
 from core.executor import TaskExecutor
 from datetime import datetime, timezone
 
@@ -53,13 +53,17 @@ async def create_task(
 @router.get("", response_model=List[TaskResponse])
 async def list_tasks(
     status: Optional[TaskStatus] = Query(None),
+    workspace_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """List all tasks, optionally filtered by status"""
+    """List all tasks, optionally filtered by status and/or workspace"""
     query = select(Task).options(selectinload(Task.run))
 
     if status:
         query = query.where(Task.status == status)
+
+    if workspace_id:
+        query = query.where(Task.workspace_id == workspace_id)
 
     query = query.order_by(Task.created_at.desc())
 
@@ -166,6 +170,43 @@ async def retry_task(
     return new_task
 
 
+@router.post("/{task_id}/continue", response_model=TaskResponse)
+async def continue_task(
+    task_id: int,
+    body: TaskContinueRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Continue a completed or failed task with new instructions.
+    Resets the task to TODO so the scheduler picks it up again.
+    The existing worktree is preserved so work continues in the same context.
+    """
+    result = await db.execute(
+        select(Task).where(Task.id == task_id)
+    )
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status not in (TaskStatus.DONE, TaskStatus.FAILED):
+        raise HTTPException(
+            status_code=400,
+            detail="Only DONE or FAILED tasks can be continued"
+        )
+
+    task.prompt = body.prompt
+    if body.model is not None:
+        task.model = body.model
+    task.status = TaskStatus.TODO
+    task.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(task)
+
+    return task
+
+
 @router.delete("/{task_id}")
 async def delete_task(
     task_id: int,
@@ -208,36 +249,76 @@ async def delete_task(
 
     # Best-effort worktree cleanup (after DB commit so task deletion is not blocked)
     if worktree_path and workspace:
-        try:
-            await _remove_worktree(worktree_path, workspace)
-        except Exception as exc:
-            logger.warning("Failed to remove worktree %s for task %s: %s", worktree_path, task_id, exc)
+        await _remove_worktree(task_id, worktree_path, workspace)
 
     return {"message": "Task deleted successfully"}
 
 
-async def _remove_worktree(worktree_path: str, workspace: Workspace) -> None:
-    """Remove a git worktree directory. For SSH workspaces, executes via SSH."""
-    is_ssh = workspace.workspace_type in (WorkspaceType.SSH, WorkspaceType.SSH_CONTAINER)
-
-    if is_ssh:
-        if not workspace.host:
-            logger.warning("SSH workspace %s has no host; skipping worktree removal", workspace.workspace_id)
-            return
-        ssh_target = f"{workspace.ssh_user}@{workspace.host}" if workspace.ssh_user else workspace.host
-        remote_cmd = f"git worktree remove --force {shlex.quote(worktree_path)}"
-        cmd = ["ssh", ssh_target, remote_cmd]
-    else:
-        # Local workspace
-        cmd = ["git", "worktree", "remove", "--force", worktree_path]
-
+async def _run_cmd(cmd: list) -> tuple[int, str]:
+    """Run a subprocess command, return (returncode, stderr_text)."""
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"git worktree remove exited {proc.returncode}: {stderr.decode(errors='replace').strip()}"
+    _stdout, stderr = await proc.communicate()
+    return proc.returncode, stderr.decode(errors="replace").strip()
+
+
+async def _remove_worktree(task_id: int, worktree_path: str, workspace: Workspace) -> None:
+    """Remove a git worktree directory and its associated branch.
+
+    Each step is attempted independently so a partial failure does not
+    prevent subsequent cleanup.  All errors are logged as warnings.
+    """
+    is_ssh = workspace.workspace_type in (WorkspaceType.SSH, WorkspaceType.SSH_CONTAINER)
+    branch_name = f"task-{task_id}"
+
+    if is_ssh:
+        if not workspace.host:
+            logger.warning(
+                "SSH workspace %s has no host; skipping worktree removal", workspace.workspace_id
+            )
+            return
+        ssh_target = (
+            f"{workspace.ssh_user}@{workspace.host}" if workspace.ssh_user else workspace.host
         )
+
+        # Step 1: remove the worktree directory
+        rc, err = await _run_cmd(
+            ["ssh", ssh_target,
+             f"git worktree remove --force {shlex.quote(worktree_path)}"]
+        )
+        if rc != 0:
+            logger.warning(
+                "git worktree remove failed for task %s (ssh): %s", task_id, err
+            )
+
+        # Step 2: delete the task branch from the main repo
+        rc, err = await _run_cmd(
+            ["ssh", ssh_target,
+             f"git -C {shlex.quote(workspace.path)} branch -D {shlex.quote(branch_name)}"]
+        )
+        if rc != 0:
+            logger.warning(
+                "git branch -D %s failed for task %s (ssh): %s", branch_name, task_id, err
+            )
+
+    else:
+        # Step 1: remove the worktree directory
+        rc, err = await _run_cmd(
+            ["git", "worktree", "remove", "--force", worktree_path]
+        )
+        if rc != 0:
+            logger.warning(
+                "git worktree remove failed for task %s: %s", task_id, err
+            )
+
+        # Step 2: delete the task branch from the main repo
+        rc, err = await _run_cmd(
+            ["git", "-C", workspace.path, "branch", "-D", branch_name]
+        )
+        if rc != 0:
+            logger.warning(
+                "git branch -D %s failed for task %s: %s", branch_name, task_id, err
+            )

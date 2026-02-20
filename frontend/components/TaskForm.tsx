@@ -18,7 +18,13 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-export default function TaskForm() {
+interface TaskFormProps {
+  defaultWorkspaceId?: string;
+  /** When set, the workspace selector is hidden and this workspace is always used. */
+  lockedWorkspaceId?: number;
+}
+
+export default function TaskForm({ defaultWorkspaceId, lockedWorkspaceId }: TaskFormProps) {
   const router = useRouter();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(false);
@@ -55,13 +61,20 @@ export default function TaskForm() {
       .then((res) => {
         setWorkspaces(res.data);
         if (res.data.length > 0) {
-          // Prefer the last-used workspace stored in localStorage
-          const lastId = typeof window !== 'undefined'
-            ? localStorage.getItem('lastWorkspaceId')
-            : null;
-          const defaultWs = (lastId && res.data.find((w) => w.workspace_id.toString() === lastId))
-            ?? res.data[0];
-          const defaultId = defaultWs.workspace_id.toString();
+          let defaultId: string;
+          if (lockedWorkspaceId !== undefined) {
+            // Workspace is locked from URL — use it directly
+            defaultId = lockedWorkspaceId.toString();
+          } else {
+            // Priority: URL param > localStorage > first workspace
+            const lastId = typeof window !== 'undefined'
+              ? localStorage.getItem('lastWorkspaceId')
+              : null;
+            const targetId = defaultWorkspaceId ?? lastId;
+            const defaultWs = (targetId && res.data.find((w) => w.workspace_id.toString() === targetId))
+              ?? res.data[0];
+            defaultId = defaultWs.workspace_id.toString();
+          }
           setFormData((prev) => ({
             ...prev,
             workspace_id: defaultId,
@@ -119,8 +132,8 @@ export default function TaskForm() {
         backend: formData.backend,
       });
 
-      // Redirect to task board
-      router.push('/');
+      // Redirect to workspace board
+      router.push(`/workspaces/${formData.workspace_id}/board`);
     } catch (error: unknown) {
       if (axios.isAxiosError<ApiErrorBody>(error)) {
         setError(error.response?.data?.detail || error.message || 'Failed to create task');
@@ -165,36 +178,46 @@ export default function TaskForm() {
           )}
 
           {/* Workspace */}
-          <div className="space-y-2">
-            <Label htmlFor="workspace">
-              Workspace <span className="text-red-500">*</span>
-            </Label>
-            <Select
-              value={formData.workspace_id}
-              onValueChange={(value) => {
-                setFormData({ ...formData, workspace_id: value });
-                localStorage.setItem('lastWorkspaceId', value);
-                fetchSuggestedTitle(value);
-              }}
-            >
-              <SelectTrigger className={errors.workspace_id ? 'border-red-500' : ''}>
-                <SelectValue placeholder="Select a workspace" />
-              </SelectTrigger>
-              <SelectContent>
-                {workspaces.map((ws) => (
-                  <SelectItem
-                    key={ws.workspace_id}
-                    value={ws.workspace_id.toString()}
-                  >
-                    {ws.display_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {errors.workspace_id && (
-              <p className="text-sm text-red-500">{errors.workspace_id}</p>
-            )}
-          </div>
+          {lockedWorkspaceId !== undefined ? (
+            <div className="space-y-1">
+              <Label>Workspace</Label>
+              <p className="text-sm px-3 py-2 bg-slate-50 border rounded-md text-muted-foreground">
+                {workspaces.find((w) => w.workspace_id === lockedWorkspaceId)?.display_name
+                  ?? `Workspace ${lockedWorkspaceId}`}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="workspace">
+                Workspace <span className="text-red-500">*</span>
+              </Label>
+              <Select
+                value={formData.workspace_id}
+                onValueChange={(value) => {
+                  setFormData({ ...formData, workspace_id: value });
+                  localStorage.setItem('lastWorkspaceId', value);
+                  fetchSuggestedTitle(value);
+                }}
+              >
+                <SelectTrigger className={errors.workspace_id ? 'border-red-500' : ''}>
+                  <SelectValue placeholder="Select a workspace" />
+                </SelectTrigger>
+                <SelectContent>
+                  {workspaces.map((ws) => (
+                    <SelectItem
+                      key={ws.workspace_id}
+                      value={ws.workspace_id.toString()}
+                    >
+                      {ws.display_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.workspace_id && (
+                <p className="text-sm text-red-500">{errors.workspace_id}</p>
+              )}
+            </div>
+          )}
 
           {/* Title */}
           <div className="space-y-2">
@@ -283,7 +306,9 @@ export default function TaskForm() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => router.push('/')}
+              onClick={() =>
+                router.push(formData.workspace_id ? `/workspaces/${formData.workspace_id}/board` : '/')
+              }
             >
               Cancel
             </Button>

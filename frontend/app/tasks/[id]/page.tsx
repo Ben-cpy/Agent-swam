@@ -9,6 +9,8 @@ import { ApiErrorBody, BackendType, TaskStatus, WorkspaceType } from '@/lib/type
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 import LogStream from '@/components/LogStream';
 import { formatDistanceToNow } from 'date-fns';
 import { parseUTCDate } from '@/lib/utils';
@@ -28,8 +30,10 @@ export default function TaskDetailPage() {
   const router = useRouter();
   const taskId = parseInt(params.id as string, 10);
   const [actionLoading, setActionLoading] = useState(false);
+  const [continuePrompt, setContinuePrompt] = useState('');
+  const [continueLoading, setContinueLoading] = useState(false);
 
-  // Fetch task with auto-refresh every 3 seconds
+  // Fetch task with auto-refresh every 2 seconds
   const { data, error, isLoading, mutate } = useSWR(
     `/tasks/${taskId}`,
     () => taskAPI.get(taskId),
@@ -60,7 +64,7 @@ export default function TaskDetailPage() {
     setActionLoading(true);
     try {
       await taskAPI.cancel(taskId);
-      mutate(); // Refresh task data
+      mutate();
     } catch (error: unknown) {
       alert(`Failed to cancel task: ${getErrorMessage(error, 'Unknown error')}`);
     } finally {
@@ -73,7 +77,6 @@ export default function TaskDetailPage() {
     try {
       const response = await taskAPI.retry(taskId);
       const newTaskId = response.data.id;
-      // Redirect to the new task
       router.push(`/tasks/${newTaskId}`);
     } catch (error: unknown) {
       alert(`Failed to retry task: ${getErrorMessage(error, 'Unknown error')}`);
@@ -89,10 +92,24 @@ export default function TaskDetailPage() {
     setActionLoading(true);
     try {
       await taskAPI.delete(taskId);
-      router.push('/');
+      router.push(task ? `/workspaces/${task.workspace_id}/board` : '/');
     } catch (error: unknown) {
       alert(`Failed to delete task: ${getErrorMessage(error, 'Unknown error')}`);
       setActionLoading(false);
+    }
+  };
+
+  const handleContinue = async () => {
+    if (!continuePrompt.trim()) return;
+    setContinueLoading(true);
+    try {
+      await taskAPI.continue(taskId, { prompt: continuePrompt });
+      setContinuePrompt('');
+      mutate();
+    } catch (error: unknown) {
+      alert(`Failed to continue task: ${getErrorMessage(error, 'Unknown error')}`);
+    } finally {
+      setContinueLoading(false);
     }
   };
 
@@ -115,7 +132,7 @@ export default function TaskDetailPage() {
       <div className="text-center py-12">
         <h2 className="text-2xl font-bold text-red-600 mb-4">Error Loading Task</h2>
         <p className="text-muted-foreground mb-4">{error.message}</p>
-        <Button onClick={() => router.push('/')}>Back to Board</Button>
+        <Button onClick={() => router.push('/')}>Back to Workspaces</Button>
       </div>
     );
   }
@@ -142,7 +159,7 @@ export default function TaskDetailPage() {
             {formatDistanceToNow(parseUTCDate(task.created_at), { addSuffix: true })}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
           {isSSHWorkspace && (
             <Button
               variant="outline"
@@ -174,7 +191,7 @@ export default function TaskDetailPage() {
               Delete Task
             </Button>
           )}
-          <Button variant="outline" onClick={() => router.push('/')}>
+          <Button variant="outline" onClick={() => router.push(task ? `/workspaces/${task.workspace_id}/board` : '/')}>
             Back to Board
           </Button>
         </div>
@@ -186,56 +203,60 @@ export default function TaskDetailPage() {
           <CardTitle>Task Details</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div>
-            <label className="text-sm font-medium text-muted-foreground">
-              Backend
-            </label>
-            <p className="mt-1">{getBackendLabel(task.backend)}</p>
+          {/* Row 1: Backend | Base Branch */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium text-muted-foreground">Backend</label>
+              <p className="mt-1">{getBackendLabel(task.backend)}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-muted-foreground">Base Branch</label>
+              <p className="mt-1">{task.branch_name || '-'}</p>
+            </div>
           </div>
+
+          {/* Row 2: Workspace */}
           <div>
-            <label className="text-sm font-medium text-muted-foreground">
-              Workspace ID
-            </label>
-            <p className="mt-1">{task.workspace_id}</p>
+            <label className="text-sm font-medium text-muted-foreground">Workspace</label>
+            <p className="mt-1">
+              {taskWorkspace ? (
+                <>
+                  {taskWorkspace.display_name}{' '}
+                  <span className="text-muted-foreground text-xs">#{task.workspace_id}</span>
+                </>
+              ) : (
+                task.workspace_id
+              )}
+            </p>
           </div>
+
+          {/* Row 3: Worktree Path */}
           <div>
-            <label className="text-sm font-medium text-muted-foreground">
-              Base Branch
-            </label>
-            <p className="mt-1">{task.branch_name || '-'}</p>
+            <label className="text-sm font-medium text-muted-foreground">Worktree Path</label>
+            <p className="mt-1 break-all font-mono text-sm">{task.worktree_path || '-'}</p>
           </div>
-          <div>
-            <label className="text-sm font-medium text-muted-foreground">
-              Worktree Path
-            </label>
-            <p className="mt-1 break-all">{task.worktree_path || '-'}</p>
+
+          {/* Row 4: Created At | Updated At */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium text-muted-foreground">Created At</label>
+              <p className="mt-1 text-sm">{parseUTCDate(task.created_at).toLocaleString()}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-muted-foreground">Updated At</label>
+              <p className="mt-1 text-sm">{parseUTCDate(task.updated_at).toLocaleString()}</p>
+            </div>
           </div>
+
+          {/* Row 5: Prompt */}
           <div>
-            <label className="text-sm font-medium text-muted-foreground">
-              Prompt
-            </label>
+            <label className="text-sm font-medium text-muted-foreground">Prompt</label>
             <div className="mt-1 bg-slate-50 p-4 rounded-lg whitespace-pre-wrap font-mono text-sm">
               {task.prompt}
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">
-                Created At
-              </label>
-              <p className="mt-1 text-sm">
-                {parseUTCDate(task.created_at).toLocaleString()}
-              </p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">
-                Updated At
-              </label>
-              <p className="mt-1 text-sm">
-                {parseUTCDate(task.updated_at).toLocaleString()}
-              </p>
-            </div>
-          </div>
+
+          {/* Row 6: API Usage (conditional) */}
           {task.usage_json && (task.status === TaskStatus.DONE || task.status === TaskStatus.FAILED) && (() => {
             try {
               const usage = JSON.parse(task.usage_json);
@@ -307,6 +328,36 @@ export default function TaskDetailPage() {
             <p className="text-muted-foreground">
               Task is waiting to be executed. Logs will appear here once execution starts.
             </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Continue / Additional Instructions */}
+      {(task.status === TaskStatus.DONE || task.status === TaskStatus.FAILED) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Continue / Additional Instructions</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Send new instructions to continue work in the same worktree. The task will be re-queued and executed with the new prompt.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="continue-prompt">New Instructions</Label>
+              <Textarea
+                id="continue-prompt"
+                value={continuePrompt}
+                onChange={(e) => setContinuePrompt(e.target.value)}
+                placeholder="Describe what else should be done or corrected..."
+                rows={4}
+              />
+            </div>
+            <Button
+              onClick={handleContinue}
+              disabled={continueLoading || !continuePrompt.trim()}
+            >
+              {continueLoading ? 'Sending...' : 'Send Instructions'}
+            </Button>
           </CardContent>
         </Card>
       )}
