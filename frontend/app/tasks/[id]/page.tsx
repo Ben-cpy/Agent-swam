@@ -78,11 +78,11 @@ export default function TaskDetailPage() {
   const handleRetry = async () => {
     setActionLoading(true);
     try {
-      const response = await taskAPI.retry(taskId);
-      const newTaskId = response.data.id;
-      router.push(`/tasks/${newTaskId}`);
+      await taskAPI.retry(taskId);
+      mutate();
     } catch (error: unknown) {
       alert(`Failed to retry task: ${getErrorMessage(error, 'Unknown error')}`);
+    } finally {
       setActionLoading(false);
     }
   };
