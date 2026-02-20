@@ -1,4 +1,8 @@
-﻿* **Task 内一键 Merge（b144ffa，2026-02-20）**：  
+﻿* **task-14 合并入主分支（447b446，2026-02-20）**：  
+  - 问题：`task-14` 与 `main` 已分叉，需把“一键合并”功能安全并入主线。  
+  - 解决：在 `main` worktree 执行 `git merge --no-ff task-14`，完成后端 merge API 与前端按钮改动合入，生成 merge commit `447b446`。  
+  - 避免复发：后续同类任务统一先检查 `git worktree list` 和分叉计数，再在目标分支所在 worktree 完成合并。  
+* **Task 内一键 Merge（b144ffa，2026-02-20）**：  
   - 问题：每次任务完成后都要手动重复输入“把当前 worktree 合并回主分支”的提示词，流程冗余且易漏。  
   - 解决：新增后端 POST /api/tasks/{id}/merge（固定 merge prompt + 复用 continue 重入机制，保持原 worktree），并在任务详情页新增 Merge to Base 按钮一键触发。  
   - 避免复发：把“高频固定动作”沉淀为显式 API + UI 按钮，不再依赖人工重复输入 prompt。  
@@ -13,4 +17,7 @@
   - `feature/model-selection`（3a0d149）：`/api/models` 端点+10分钟缓存；Task 新增 `model` 列；ClaudeCodeAdapter/CodexAdapter 透传 `--model` 参数；前端 TaskForm 动态 model 下拉框。
   - `feature/usage-aggregation`（bebd636）：`/api/usage` 端点聚合 Run.usage_json；同时支持 claude_code（cost_usd）和 codex_cli（total_tokens）；前端 UsageSummary 卡片置于 Dashboard 顶部，SWR 30s 刷新。
   - `feature/tmux-terminal`（3be1bec）：Run 新增 `tmux_session` 列；SSH workspace 任务包裹 tmux 执行；`/api/tasks/{id}/terminal` WebSocket 端点（asyncssh）实现 PTY 双向中继；前端 `/tasks/[id]/terminal` xterm.js 终端页；任务详情页新增"Open Terminal"按钮（仅 SSH workspace 可见）。
-
+* **Review 状态 + 直接合并 + 全局并发设置（11be924，2026-02-20）**：
+  - 问题：任务完成即 DONE，缺少人工 Review 阶段；Merge 依赖 AI 二次执行；调度仍按串行导致 worktree 并行能力未利用。
+  - 解决：新增 TO_BE_REVIEW 状态流（RUNNING 成功后进入 Review）；POST /api/tasks/{id}/merge 改为后端直接 git merge + 清理 worktree；新增 /api/settings 与前端 /settings 管理全局 workspace_max_parallel（默认 3），并立即覆盖 runner/workspace 并发；scheduler 按 workspace/runner 限额并行派发。
+  - 避免复发：涉及状态机与调度策略升级时，必须同步检查后端枚举、接口约束、前端状态映射和可见性条件，避免只改单点导致流程断裂。
