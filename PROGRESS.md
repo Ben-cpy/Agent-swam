@@ -21,3 +21,7 @@
   - 问题：任务完成即 DONE，缺少人工 Review 阶段；Merge 依赖 AI 二次执行；调度仍按串行导致 worktree 并行能力未利用。
   - 解决：新增 TO_BE_REVIEW 状态流（RUNNING 成功后进入 Review）；POST /api/tasks/{id}/merge 改为后端直接 git merge + 清理 worktree；新增 /api/settings 与前端 /settings 管理全局 workspace_max_parallel（默认 3），并立即覆盖 runner/workspace 并发；scheduler 按 workspace/runner 限额并行派发。
   - 避免复发：涉及状态机与调度策略升级时，必须同步检查后端枚举、接口约束、前端状态映射和可见性条件，避免只改单点导致流程断裂。
+* **长 Prompt 任务失败修复（31d33e7，2026-02-20）**：
+  - 问题：Windows 下将超长 prompt 作为命令行参数传给 claude/codex 时，任务会快速失败（命令行长度上限风险）。
+  - 解决：后端适配器改为通过 stdin 传入 prompt（codex exec - + claude --input-format text），并在前后端统一 prompt_max_chars=65536 校验与计数提示。
+  - 避免复发：后续对大文本输入统一采用 stdin/文件通道，不再依赖命令行参数承载长内容；长度阈值统一由配置常量管理。
