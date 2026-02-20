@@ -29,4 +29,7 @@
   - 问题：Windows 下将超长 prompt 作为命令行参数传给 claude/codex 时，任务会快速失败（命令行长度上限风险）。
   - 解决：后端适配器改为通过 stdin 传入 prompt（codex exec - + claude --input-format text），并在前后端统一 prompt_max_chars=65536 校验与计数提示。
   - 避免复发：后续对大文本输入统一采用 stdin/文件通道，不再依赖命令行参数承载长内容；长度阈值统一由配置常量管理。
-
+* **Execution Logs 自动滚动打断操作修复（729ac03，2026-02-20）**：
+  - 问题：任务详情页日志持续更新时，组件每次通过 `scrollIntoView` 触发整页滚动，导致页面焦点频繁被拖回日志区，影响用户在主界面操作。
+  - 解决：`LogStream` 改为监听日志容器滚动位置，仅在“用户当前接近底部”时自动跟随，且只滚动日志容器自身（`scrollTop`），不再驱动页面滚动。
+  - 避免复发：流式日志/聊天窗口类组件统一采用“sticky-to-bottom”策略，不直接在更新时调用可能影响整页滚动的 `scrollIntoView`。
