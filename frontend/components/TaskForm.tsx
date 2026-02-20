@@ -74,7 +74,7 @@ export default function TaskForm({ defaultWorkspaceId, lockedWorkspaceId }: Task
               ? localStorage.getItem('lastWorkspaceId')
               : null;
             const targetId = defaultWorkspaceId ?? lastId;
-            const defaultWs = (targetId && res.data.find((w) => w.workspace_id.toString() === targetId))
+            const defaultWs = (targetId ? res.data.find((w) => w.workspace_id.toString() === targetId) : undefined)
               ?? res.data[0];
             defaultId = defaultWs.workspace_id.toString();
           }

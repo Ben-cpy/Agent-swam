@@ -8,7 +8,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.backends import ClaudeCodeAdapter, CodexAdapter
+from core.adapters import ClaudeCodeAdapter, CodexAdapter
 from models import ErrorClass, Run, Runner, Task, TaskStatus, Workspace, WorkspaceType
 
 logger = logging.getLogger(__name__)

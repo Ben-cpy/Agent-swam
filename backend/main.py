@@ -1,4 +1,4 @@
-﻿from fastapi import FastAPI
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
@@ -25,7 +25,7 @@ from database import init_db, close_db, async_session_maker
 from runner.agent import LocalRunnerAgent
 from core.scheduler import TaskScheduler, RunnerHeartbeat
 from api import tasks, workspaces, logs, usage, terminal
-from api import models as models_api
+from api import ai_models as models_api
 
 # Configure logging
 logging.basicConfig(
