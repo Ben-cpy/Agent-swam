@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import shlex
 from datetime import datetime, timezone
 from typing import Optional
@@ -37,20 +38,55 @@ class TaskExecutor:
             raise RuntimeError("Failed to detect branch: empty output")
         return branch
 
-    async def _create_worktree(self, task_id: int, workspace_path: str, base_branch: str) -> str:
-        worktree_path = f"{workspace_path}-task-{task_id}"
+    async def _branch_exists(self, workspace_path: str, branch_name: str) -> bool:
+        """Check if a git branch exists in the given workspace."""
+        process = await asyncio.create_subprocess_exec(
+            "git", "-C", workspace_path, "rev-parse", "--verify", branch_name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await process.communicate()
+        return process.returncode == 0
+
+    async def _create_worktree(self, task_id: int, workspace_path: str, base_branch: str, target_path: Optional[str] = None) -> str:
+        """Create or reuse a git worktree for a task.
+
+        Handles three cases:
+        1. Directory already exists → reuse as-is.
+        2. Directory missing but branch exists → checkout the existing branch.
+        3. Neither exists → create a new branch from base_branch.
+        """
+        worktree_path = target_path or f"{workspace_path}-task-{task_id}"
         worktree_branch = f"task-{task_id}"
-        cmd = [
-            "git",
-            "-C",
-            workspace_path,
-            "worktree",
-            "add",
-            "-b",
-            worktree_branch,
-            worktree_path,
-            base_branch,
-        ]
+
+        # Case 1: directory already exists, just reuse it
+        if os.path.isdir(worktree_path):
+            logger.info(
+                "Worktree directory already exists at %s for task %s, reusing",
+                worktree_path,
+                task_id,
+            )
+            return worktree_path
+
+        # Case 2: branch already exists → checkout without -b
+        if await self._branch_exists(workspace_path, worktree_branch):
+            cmd = ["git", "-C", workspace_path, "worktree", "add", worktree_path, worktree_branch]
+            logger.info(
+                "Branch %s already exists; checking it out into %s for task %s",
+                worktree_branch,
+                worktree_path,
+                task_id,
+            )
+        else:
+            # Case 3: create fresh branch from base_branch
+            cmd = [
+                "git", "-C", workspace_path,
+                "worktree", "add",
+                "-b", worktree_branch,
+                worktree_path,
+                base_branch,
+            ]
+
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -60,10 +96,9 @@ class TaskExecutor:
         if process.returncode != 0:
             raise RuntimeError(f"Failed to create worktree: {stderr.decode(errors='replace').strip()}")
         logger.info(
-            "Created worktree for task %s at %s from base branch %s",
+            "Created worktree for task %s at %s",
             task_id,
             worktree_path,
-            base_branch,
         )
         return worktree_path
 
@@ -165,8 +200,27 @@ class TaskExecutor:
             await db.commit()
 
         if task.worktree_path:
-            # Continued task: reuse the existing worktree instead of creating a new one
-            logger.info("Reusing existing worktree %s for task %s", task.worktree_path, task_id)
+            if os.path.isdir(task.worktree_path):
+                # Directory is present — reuse it directly
+                logger.info("Reusing existing worktree %s for task %s", task.worktree_path, task_id)
+            else:
+                # Directory was removed (e.g. manual cleanup); recreate from the existing branch
+                logger.warning(
+                    "Worktree directory %s missing for task %s, recreating",
+                    task.worktree_path,
+                    task_id,
+                )
+                try:
+                    await self._create_worktree(
+                        task_id, workspace.path, task.branch_name,
+                        target_path=task.worktree_path,
+                    )
+                except Exception as exc:
+                    task.status = TaskStatus.FAILED
+                    task.updated_at = datetime.now(timezone.utc)
+                    await db.commit()
+                    logger.error("Task %s failed to recreate worktree: %s", task_id, exc)
+                    return False
         else:
             try:
                 worktree_path = await self._create_worktree(task_id, workspace.path, task.branch_name)
