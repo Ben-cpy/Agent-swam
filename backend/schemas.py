@@ -12,6 +12,7 @@ class TaskBase(BaseModel):
     backend: BackendType
     branch_name: Optional[str] = Field(None, max_length=200)
     model: Optional[str] = None
+    permission_mode: Optional[str] = None
 
 
 class TaskCreate(TaskBase):
@@ -150,3 +151,24 @@ class NextTaskNumberResponse(BaseModel):
 class TaskContinueRequest(BaseModel):
     prompt: str
     model: Optional[str] = None
+
+
+# Workspace Resource Monitoring Schemas
+class GpuInfo(BaseModel):
+    name: str
+    memory_used_mb: int
+    memory_total_mb: int
+    utilization_pct: int
+
+
+class MemoryInfo(BaseModel):
+    total_mb: int
+    used_mb: int
+    free_mb: int
+    used_pct: float
+
+
+class WorkspaceResourcesResponse(BaseModel):
+    gpu: Optional[List[GpuInfo]] = None
+    gpu_available: bool
+    memory: Optional[MemoryInfo] = None

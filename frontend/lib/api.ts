@@ -10,6 +10,7 @@ import {
   UsageStats,
   Workspace,
   WorkspaceCreateInput,
+  WorkspaceResources,
 } from './types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000/api';
@@ -59,6 +60,7 @@ export const workspaceAPI = {
   list: () => apiClient.get<Workspace[]>('/workspaces'),
   create: (data: WorkspaceCreateInput) => apiClient.post<Workspace>('/workspaces', data),
   delete: (id: number) => apiClient.delete(`/workspaces/${id}`),
+  resources: (id: number) => apiClient.get<WorkspaceResources>(`/workspaces/${id}/resources`),
 };
 
 // Usage APIs

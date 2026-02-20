@@ -4,6 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { taskAPI, workspaceAPI } from '@/lib/api';
 import TaskBoard from '@/components/TaskBoard';
+import WorkspaceResources from '@/components/WorkspaceResources';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -73,6 +74,8 @@ export default function WorkspaceBoardPage() {
           <Button size="lg">+ New Task</Button>
         </Link>
       </div>
+
+      <WorkspaceResources workspaceId={workspaceId} />
 
       {isLoading && tasks.length === 0 && (
         <div className="text-center py-12">

@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List
+from typing import Dict, List, Optional
 from database import get_db
 from models import Workspace, Runner, WorkspaceType, Task, TaskStatus, Run
-from schemas import WorkspaceCreate, WorkspaceResponse
+from schemas import WorkspaceCreate, WorkspaceResponse, WorkspaceResourcesResponse, GpuInfo, MemoryInfo
+import asyncio
 import os
+import platform
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
@@ -164,3 +166,165 @@ async def delete_workspace(
 
     await db.delete(workspace)
     await db.commit()
+
+
+async def _run_local_command(args: list[str]) -> tuple[int, str]:
+    """Run a local subprocess and return (returncode, stdout)."""
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+    return proc.returncode, stdout.decode(errors="replace")
+
+
+async def _run_ssh_command(ssh_host: str, cmd: str) -> Optional[str]:
+    """Run a command on a remote SSH host, returning stdout or None on failure."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ssh", ssh_host, f"{cmd} 2>/dev/null || echo UNAVAILABLE",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        text = stdout.decode(errors="replace").strip()
+        if text == "UNAVAILABLE" or proc.returncode != 0:
+            return None
+        return text
+    except Exception:
+        return None
+
+
+def _parse_gpu_output(raw: str) -> Optional[List[GpuInfo]]:
+    """Parse nvidia-smi CSV output into GpuInfo list."""
+    gpus = []
+    for line in raw.strip().splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 4:
+            continue
+        try:
+            gpus.append(GpuInfo(
+                name=parts[0],
+                memory_used_mb=int(parts[1]),
+                memory_total_mb=int(parts[2]),
+                utilization_pct=int(parts[3]),
+            ))
+        except (ValueError, IndexError):
+            continue
+    return gpus if gpus else None
+
+
+def _parse_memory_linux(raw: str) -> Optional[MemoryInfo]:
+    """Parse `free -m` output (Linux)."""
+    for line in raw.splitlines():
+        if line.startswith("Mem:"):
+            parts = line.split()
+            if len(parts) >= 4:
+                try:
+                    total = int(parts[1])
+                    used = int(parts[2])
+                    free = int(parts[3])
+                    used_pct = round(used / total * 100, 1) if total > 0 else 0.0
+                    return MemoryInfo(total_mb=total, used_mb=used, free_mb=free, used_pct=used_pct)
+                except (ValueError, IndexError):
+                    pass
+    return None
+
+
+def _parse_memory_windows(raw: str) -> Optional[MemoryInfo]:
+    """Parse wmic output (Windows, values in KB)."""
+    values: Dict[str, int] = {}
+    for line in raw.splitlines():
+        line = line.strip()
+        if "=" in line:
+            key, _, val = line.partition("=")
+            try:
+                values[key.strip()] = int(val.strip())
+            except ValueError:
+                pass
+    total_kb = values.get("TotalVisibleMemorySize")
+    free_kb = values.get("FreePhysicalMemory")
+    if total_kb and free_kb:
+        total_mb = total_kb // 1024
+        free_mb = free_kb // 1024
+        used_mb = total_mb - free_mb
+        used_pct = round(used_mb / total_mb * 100, 1) if total_mb > 0 else 0.0
+        return MemoryInfo(total_mb=total_mb, used_mb=used_mb, free_mb=free_mb, used_pct=used_pct)
+    return None
+
+
+NVIDIA_SMI_ARGS = [
+    "nvidia-smi",
+    "--query-gpu=name,memory.used,memory.total,utilization.gpu",
+    "--format=csv,noheader,nounits",
+]
+
+
+@router.get("/{workspace_id}/resources", response_model=WorkspaceResourcesResponse)
+async def get_workspace_resources(
+    workspace_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return GPU and memory usage for the workspace's machine."""
+    result = await db.execute(select(Workspace).where(Workspace.workspace_id == workspace_id))
+    workspace = result.scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    is_ssh = workspace.workspace_type in (WorkspaceType.SSH, WorkspaceType.SSH_CONTAINER)
+
+    if not is_ssh:
+        # --- LOCAL ---
+        # GPU
+        gpu: Optional[List[GpuInfo]] = None
+        gpu_available = False
+        try:
+            rc, out = await _run_local_command(NVIDIA_SMI_ARGS)
+            if rc == 0:
+                gpu = _parse_gpu_output(out)
+                gpu_available = gpu is not None
+        except (FileNotFoundError, asyncio.TimeoutError, OSError):
+            gpu_available = False
+
+        # Memory
+        memory: Optional[MemoryInfo] = None
+        try:
+            if platform.system() == "Windows":
+                rc, out = await _run_local_command([
+                    "wmic", "OS", "get",
+                    "FreePhysicalMemory,TotalVisibleMemorySize",
+                    "/Value", "/format:list",
+                ])
+                if rc == 0:
+                    memory = _parse_memory_windows(out)
+            else:
+                rc, out = await _run_local_command(["free", "-m"])
+                if rc == 0:
+                    memory = _parse_memory_linux(out)
+        except (FileNotFoundError, asyncio.TimeoutError, OSError):
+            memory = None
+
+        return WorkspaceResourcesResponse(gpu=gpu, gpu_available=gpu_available, memory=memory)
+
+    # --- SSH ---
+    ssh_host = workspace.host
+    if not ssh_host:
+        return WorkspaceResourcesResponse(gpu=None, gpu_available=False, memory=None)
+
+    # GPU via SSH
+    gpu = None
+    gpu_available = False
+    nvidia_cmd = " ".join(NVIDIA_SMI_ARGS)
+    gpu_raw = await _run_ssh_command(ssh_host, nvidia_cmd)
+    if gpu_raw:
+        gpu = _parse_gpu_output(gpu_raw)
+        gpu_available = gpu is not None
+
+    # Memory via SSH (assume Linux remote)
+    memory = None
+    mem_raw = await _run_ssh_command(ssh_host, "free -m")
+    if mem_raw:
+        memory = _parse_memory_linux(mem_raw)
+
+    return WorkspaceResourcesResponse(gpu=gpu, gpu_available=gpu_available, memory=memory)

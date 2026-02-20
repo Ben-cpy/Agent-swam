@@ -29,6 +29,7 @@ export interface Task {
   branch_name?: string | null;
   worktree_path?: string | null;
   model?: string | null;
+  permission_mode?: string | null;
   run_started_at?: string | null;
   usage_json?: string | null;
 }
@@ -40,6 +41,7 @@ export interface TaskCreateInput {
   backend: BackendType;
   branch_name?: string;
   model?: string;
+  permission_mode?: string;
 }
 
 export interface BackendModelInfo {
@@ -116,6 +118,26 @@ export interface BackendUsage {
   runs: number;
   cost_usd: number;
   tokens: number;
+}
+
+export interface GpuInfo {
+  name: string;
+  memory_used_mb: number;
+  memory_total_mb: number;
+  utilization_pct: number;
+}
+
+export interface MemoryInfo {
+  total_mb: number;
+  used_mb: number;
+  free_mb: number;
+  used_pct: number;
+}
+
+export interface WorkspaceResources {
+  gpu: GpuInfo[] | null;
+  gpu_available: boolean;
+  memory: MemoryInfo | null;
 }
 
 export interface UsageStats {

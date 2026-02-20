@@ -36,7 +36,10 @@ export default function TaskForm({ defaultWorkspaceId, lockedWorkspaceId }: Task
     prompt: '',
     workspace_id: '',
     backend: BackendType.CLAUDE_CODE,
+    permission_mode: 'bypassPermissions',
   });
+  const [customPermissionMode, setCustomPermissionMode] = useState('');
+  const [showCustomPermission, setShowCustomPermission] = useState(false);
 
   const [errors, setErrors] = useState({
     title: '',
@@ -125,11 +128,17 @@ export default function TaskForm({ defaultWorkspaceId, lockedWorkspaceId }: Task
     setError(null);
 
     try {
+      const effectivePermissionMode =
+        formData.backend === BackendType.CLAUDE_CODE
+          ? (showCustomPermission ? customPermissionMode.trim() || 'bypassPermissions' : formData.permission_mode)
+          : undefined;
+
       await taskAPI.create({
         title: formData.title,
         prompt: formData.prompt,
         workspace_id: parseInt(formData.workspace_id),
         backend: formData.backend,
+        ...(effectivePermissionMode ? { permission_mode: effectivePermissionMode } : {}),
       });
 
       // Redirect to workspace board
@@ -297,6 +306,43 @@ export default function TaskForm({ defaultWorkspaceId, lockedWorkspaceId }: Task
               </label>
             </div>
           </div>
+
+          {/* Permission Mode (Claude Code only) */}
+          {formData.backend === BackendType.CLAUDE_CODE && (
+            <div className="space-y-2">
+              <Label>Permission Mode</Label>
+              <Select
+                value={showCustomPermission ? 'custom' : formData.permission_mode}
+                onValueChange={(value) => {
+                  if (value === 'custom') {
+                    setShowCustomPermission(true);
+                  } else {
+                    setShowCustomPermission(false);
+                    setFormData({ ...formData, permission_mode: value });
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select permission mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bypassPermissions">bypassPermissions (default)</SelectItem>
+                  <SelectItem value="plan">plan</SelectItem>
+                  <SelectItem value="acceptEdits">acceptEdits</SelectItem>
+                  <SelectItem value="dontAsk">dontAsk</SelectItem>
+                  <SelectItem value="default">default</SelectItem>
+                  <SelectItem value="custom">Custom...</SelectItem>
+                </SelectContent>
+              </Select>
+              {showCustomPermission && (
+                <Input
+                  value={customPermissionMode}
+                  onChange={(e) => setCustomPermissionMode(e.target.value)}
+                  placeholder="Enter custom permission mode"
+                />
+              )}
+            </div>
+          )}
 
           {/* Submit Button */}
           <div className="flex gap-3">

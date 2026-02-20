@@ -57,6 +57,7 @@ class Task(Base):
     branch_name = Column(String(200), nullable=True)
     worktree_path = Column(String(1000), nullable=True)
     model = Column(String(200), nullable=True)
+    permission_mode = Column(String(50), nullable=True)  # None = bypassPermissions (current default)
 
     # Relationships
     workspace = relationship("Workspace", back_populates="tasks")

@@ -144,6 +144,7 @@ class TaskExecutor:
                     backend=task.backend.value,
                     prompt=task.prompt,
                     tmux_session=tmux_session_name,
+                    permission_mode=task.permission_mode,
                 )
             )
             return True
@@ -208,6 +209,7 @@ class TaskExecutor:
                 backend=task.backend.value,
                 prompt=task.prompt,
                 model=task.model,
+                permission_mode=task.permission_mode,
             )
         )
         return True
@@ -220,10 +222,11 @@ class TaskExecutor:
         backend: str,
         prompt: str,
         model: Optional[str] = None,
+        permission_mode: Optional[str] = None,
     ):
         try:
             if backend == "claude_code":
-                adapter = ClaudeCodeAdapter(workspace_path, model=model)
+                adapter = ClaudeCodeAdapter(workspace_path, model=model, permission_mode=permission_mode)
             elif backend == "codex_cli":
                 adapter = CodexAdapter(workspace_path, model=model)
             else:
@@ -275,13 +278,18 @@ class TaskExecutor:
         backend: str,
         prompt: str,
         tmux_session: str,
+        permission_mode: Optional[str] = None,
     ):
         """Run a task on a remote SSH host using tmux for session persistence."""
         try:
             log_file = f"/tmp/{tmux_session}.log"
 
             if backend == "claude_code":
-                cli_cmd = f"claude -p --output-format stream-json --dangerously-skip-permissions {shlex.quote(prompt)}"
+                if not permission_mode or permission_mode == "bypassPermissions":
+                    perm_flag = "--dangerously-skip-permissions"
+                else:
+                    perm_flag = f"--permission-mode {shlex.quote(permission_mode)}"
+                cli_cmd = f"claude -p --output-format stream-json {perm_flag} {shlex.quote(prompt)}"
             elif backend == "codex_cli":
                 cli_cmd = f"codex -p {shlex.quote(prompt)}"
             else:

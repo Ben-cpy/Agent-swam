@@ -8,22 +8,27 @@ import os
 class ClaudeCodeAdapter(BackendAdapter):
     """Adapter for Claude Code CLI"""
 
-    def __init__(self, workspace_path: str, model: Optional[str] = None):
+    def __init__(self, workspace_path: str, model: Optional[str] = None, permission_mode: Optional[str] = None):
         super().__init__(workspace_path)
         self.model = model
+        self.permission_mode = permission_mode
 
     def build_command(self, prompt: str) -> list[str]:
         """
         Build Claude Code command with streaming JSON output.
 
-        Format: claude -p --output-format stream-json --dangerously-skip-permissions [--model <model>] <prompt>
+        Format: claude -p --output-format stream-json [--dangerously-skip-permissions | --permission-mode <mode>] [--model <model>] <prompt>
         """
         cmd = [
             resolve_cli("claude"),
             "-p",  # Project mode
             "--output-format", "stream-json",
-            "--dangerously-skip-permissions",
         ]
+        mode = self.permission_mode
+        if not mode or mode == "bypassPermissions":
+            cmd.append("--dangerously-skip-permissions")
+        else:
+            cmd += ["--permission-mode", mode]
         if self.model:
             cmd += ["--model", self.model]
         cmd.append(prompt)
