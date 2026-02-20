@@ -149,38 +149,27 @@ async def retry_task(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Retry a failed task by creating a new task with the same parameters.
-    The original task remains in FAILED status.
+    Retry a failed task by re-queueing the same task.
+    Reuses the existing worktree and does not create a new task.
     """
     result = await db.execute(
         select(Task).where(Task.id == task_id)
     )
-    original_task = result.scalar_one_or_none()
+    task = result.scalar_one_or_none()
 
-    if not original_task:
+    if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if original_task.status != TaskStatus.FAILED:
+    if task.status != TaskStatus.FAILED:
         raise HTTPException(status_code=400, detail="Only failed tasks can be retried")
 
-    # Create new task with same parameters
-    new_task = Task(
-        title=f"{original_task.title} (Retry)",
-        prompt=original_task.prompt,
-        workspace_id=original_task.workspace_id,
-        backend=original_task.backend,
-        branch_name=original_task.branch_name,
-        model=original_task.model,
-        status=TaskStatus.TODO,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc)
-    )
+    _set_task_for_requeue(task, task.prompt, task.model)
+    task.run_id = None
 
-    db.add(new_task)
     await db.commit()
-    await db.refresh(new_task)
+    await db.refresh(task)
 
-    return new_task
+    return task
 
 
 @router.post("/{task_id}/continue", response_model=TaskResponse)
