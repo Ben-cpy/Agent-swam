@@ -26,6 +26,7 @@ class TaskScheduler:
         self.db_session_maker = db_session_maker
         self.running = False
         self.scheduler_task = None
+        self._unsupported_backend_logged: set[tuple[int, str]] = set()
 
     async def start(self):
         """Start the scheduler background task"""
@@ -145,9 +146,19 @@ class TaskScheduler:
             return False
 
         # Check runner capabilities
-        if task.backend.value not in runner.capabilities:
-            logger.warning(f"Runner {runner.runner_id} does not support backend {task.backend}")
+        backend_value = task.backend.value
+        if backend_value not in runner.capabilities:
+            key = (runner.runner_id, backend_value)
+            if key not in self._unsupported_backend_logged:
+                logger.warning(
+                    "Runner %s does not support backend %s (capabilities=%s)",
+                    runner.runner_id,
+                    backend_value,
+                    runner.capabilities,
+                )
+                self._unsupported_backend_logged.add(key)
             return False
+        self._unsupported_backend_logged.discard((runner.runner_id, backend_value))
 
         runner_limit = max(1, runner.max_parallel or 1)
         runner_running_result = await db.execute(

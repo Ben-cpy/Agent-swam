@@ -1,12 +1,17 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from core.settings_service import get_workspace_max_parallel
-from models import Runner, RunnerStatus
+from models import BackendType, Runner, RunnerStatus
 from datetime import datetime, timezone
 from config import settings
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _default_runner_capabilities() -> list[str]:
+    """Keep local runner capabilities aligned with all supported backends."""
+    return [backend.value for backend in BackendType]
 
 
 class LocalRunnerAgent:
@@ -37,14 +42,14 @@ class LocalRunnerAgent:
             # Update existing runner
             runner.status = RunnerStatus.ONLINE
             runner.heartbeat_at = datetime.now(timezone.utc)
-            runner.capabilities = ["claude_code", "codex_cli"]
+            runner.capabilities = _default_runner_capabilities()
             runner.max_parallel = max_parallel
             logger.info(f"✓ Local runner updated (ID: {runner.runner_id})")
         else:
             # Create new runner
             runner = Runner(
                 env=settings.runner_env,
-                capabilities=["claude_code", "codex_cli"],
+                capabilities=_default_runner_capabilities(),
                 status=RunnerStatus.ONLINE,
                 heartbeat_at=datetime.now(timezone.utc),
                 max_parallel=max_parallel
