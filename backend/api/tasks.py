@@ -18,6 +18,33 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 
+def _set_task_for_requeue(task: Task, prompt: str, model: Optional[str] = None) -> None:
+    """Prepare a task for re-execution in the same worktree."""
+    task.prompt = prompt
+    if model is not None:
+        task.model = model
+    task.status = TaskStatus.TODO
+    task.updated_at = datetime.now(timezone.utc)
+
+
+def _build_merge_prompt(task_id: int, base_branch: Optional[str]) -> str:
+    target_branch = (base_branch or "main").strip() or "main"
+    task_branch = f"task-{task_id}"
+    return f"""You are working inside the existing task worktree.
+Goal: merge branch `{task_branch}` back into base branch `{target_branch}`.
+
+Required steps:
+1. Review current git status and commit any intended local changes on `{task_branch}`.
+2. Merge `{task_branch}` into `{target_branch}`.
+3. If conflicts happen, resolve them proactively and complete the merge.
+4. Run the most relevant minimal validation commands (tests/build/lint) to verify result.
+5. Final output must include:
+   - merge success/failure
+   - conflict resolution summary (if any)
+   - validation commands and results
+"""
+
+
 @router.post("", response_model=TaskResponse, status_code=201)
 async def create_task(
     task: TaskCreate,
@@ -195,11 +222,46 @@ async def continue_task(
             detail="Only DONE or FAILED tasks can be continued"
         )
 
-    task.prompt = body.prompt
-    if body.model is not None:
-        task.model = body.model
-    task.status = TaskStatus.TODO
-    task.updated_at = datetime.now(timezone.utc)
+    _set_task_for_requeue(task, body.prompt, body.model)
+
+    await db.commit()
+    await db.refresh(task)
+
+    return task
+
+
+@router.post("/{task_id}/merge", response_model=TaskResponse)
+async def merge_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Continue a completed or failed task with a fixed merge prompt.
+    This reuses the same worktree and asks the backend tool to merge
+    task branch changes back to the task base branch.
+    """
+    result = await db.execute(
+        select(Task).where(Task.id == task_id)
+    )
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status not in (TaskStatus.DONE, TaskStatus.FAILED):
+        raise HTTPException(
+            status_code=400,
+            detail="Only DONE or FAILED tasks can be merged"
+        )
+
+    if not task.worktree_path:
+        raise HTTPException(
+            status_code=400,
+            detail="Task has no worktree; merge action is only available for worktree tasks"
+        )
+
+    merge_prompt = _build_merge_prompt(task.id, task.branch_name)
+    _set_task_for_requeue(task, merge_prompt)
 
     await db.commit()
     await db.refresh(task)
