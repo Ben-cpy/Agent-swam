@@ -54,14 +54,19 @@ export default function TaskForm() {
     workspaceAPI.list()
       .then((res) => {
         setWorkspaces(res.data);
-        // Auto-select first workspace if available
         if (res.data.length > 0) {
-          const firstWsId = res.data[0].workspace_id.toString();
+          // Prefer the last-used workspace stored in localStorage
+          const lastId = typeof window !== 'undefined'
+            ? localStorage.getItem('lastWorkspaceId')
+            : null;
+          const defaultWs = (lastId && res.data.find((w) => w.workspace_id.toString() === lastId))
+            ?? res.data[0];
+          const defaultId = defaultWs.workspace_id.toString();
           setFormData((prev) => ({
             ...prev,
-            workspace_id: firstWsId,
+            workspace_id: defaultId,
           }));
-          fetchSuggestedTitle(firstWsId);
+          fetchSuggestedTitle(defaultId);
         }
       })
       .catch((err) => {
@@ -168,6 +173,7 @@ export default function TaskForm() {
               value={formData.workspace_id}
               onValueChange={(value) => {
                 setFormData({ ...formData, workspace_id: value });
+                localStorage.setItem('lastWorkspaceId', value);
                 fetchSuggestedTitle(value);
               }}
             >

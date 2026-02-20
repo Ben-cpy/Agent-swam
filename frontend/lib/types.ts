@@ -30,6 +30,7 @@ export interface Task {
   worktree_path?: string | null;
   model?: string | null;
   run_started_at?: string | null;
+  usage_json?: string | null;
 }
 
 export interface TaskCreateInput {

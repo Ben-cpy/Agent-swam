@@ -99,6 +99,7 @@ export default function LogStream({ runId, initialLogs = '' }: LogStreamProps) {
   const [isComplete, setIsComplete] = useState(false);
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
@@ -151,22 +152,19 @@ export default function LogStream({ runId, initialLogs = '' }: LogStreamProps) {
     eventSource.onerror = (err) => {
       console.error('SSE connection error:', err);
       setIsConnected(false);
+      eventSource.close();
 
-      // Try to reconnect after 5 seconds if not complete
-      if (!isComplete) {
-        setTimeout(() => {
-          if (eventSourceRef.current?.readyState === EventSource.CLOSED) {
-            console.log('Attempting to reconnect...');
-            // Component will re-mount or retry connection
-          }
-        }, 5000);
-      }
+      // Schedule a reconnect attempt by incrementing the counter,
+      // which re-triggers this useEffect to create a new EventSource.
+      setTimeout(() => {
+        setReconnectAttempt((c) => c + 1);
+      }, 3000);
     };
 
     return () => {
       eventSource.close();
     };
-  }, [runId, isComplete]);
+  }, [runId, isComplete, reconnectAttempt]);
 
   // Fetch initial logs if available
   useEffect(() => {
@@ -201,7 +199,7 @@ export default function LogStream({ runId, initialLogs = '' }: LogStreamProps) {
                   }`}
                 />
                 <span className="text-xs text-muted-foreground">
-                  {isConnected ? 'Streaming' : 'Disconnected'}
+                  {isConnected ? 'Streaming' : 'Reconnecting...'}
                 </span>
               </div>
             )}

@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 
 export default function Home() {
   // Fetch tasks with SWR auto-refresh every 3 seconds
-  const { data, error, isLoading } = useSWR(
+  const { data, error, isLoading, mutate } = useSWR(
     '/tasks',
     () => taskAPI.list(),
     {
@@ -67,7 +67,7 @@ export default function Home() {
       )}
 
       {/* Task Board */}
-      {tasks.length > 0 && <TaskBoard tasks={tasks} />}
+      {tasks.length > 0 && <TaskBoard tasks={tasks} onTaskDeleted={mutate} />}
     </div>
   );
 }

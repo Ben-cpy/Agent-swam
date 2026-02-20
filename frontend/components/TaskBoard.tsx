@@ -5,6 +5,7 @@ import TaskCard from './TaskCard';
 
 interface TaskBoardProps {
   tasks: Task[];
+  onTaskDeleted?: () => void;
 }
 
 const statusColumns = [
@@ -14,7 +15,7 @@ const statusColumns = [
   { status: TaskStatus.FAILED, label: 'Failed', bgColor: 'bg-red-100' },
 ];
 
-export default function TaskBoard({ tasks }: TaskBoardProps) {
+export default function TaskBoard({ tasks, onTaskDeleted }: TaskBoardProps) {
   const groupTasksByStatus = (tasks: Task[]) => {
     const grouped: Record<TaskStatus, Task[]> = {
       [TaskStatus.TODO]: [],
@@ -58,7 +59,7 @@ export default function TaskBoard({ tasks }: TaskBoardProps) {
             </div>
 
             {/* Column Content */}
-            <div className="flex-1 bg-slate-50 rounded-b-lg p-3 space-y-3 min-h-[120px] max-h-[600px] overflow-y-auto">
+            <div className="flex-1 bg-slate-50 rounded-b-lg p-3 flex flex-col gap-3 min-h-[120px] max-h-[600px] overflow-y-auto">
               {columnTasks.length === 0 ? (
                 <div className="text-center text-sm text-muted-foreground py-8">
                   No tasks
@@ -72,6 +73,7 @@ export default function TaskBoard({ tasks }: TaskBoardProps) {
                       column.status === TaskStatus.TODO &&
                       busyWorkspaceIds.has(task.workspace_id)
                     }
+                    onDeleted={onTaskDeleted}
                   />
                 ))
               )}

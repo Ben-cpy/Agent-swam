@@ -31,6 +31,7 @@ class TaskResponse(TaskBase):
     run_id: Optional[int] = None
     worktree_path: Optional[str] = None
     run_started_at: Optional[datetime] = None
+    usage_json: Optional[str] = None
 
     @classmethod
     def from_orm(cls, obj):
@@ -38,6 +39,7 @@ class TaskResponse(TaskBase):
         try:
             if obj.run is not None:
                 instance.run_started_at = obj.run.started_at
+                instance.usage_json = obj.run.usage_json
         except Exception:
             pass
         return instance

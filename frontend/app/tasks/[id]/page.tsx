@@ -236,6 +236,66 @@ export default function TaskDetailPage() {
               </p>
             </div>
           </div>
+          {task.usage_json && (task.status === TaskStatus.DONE || task.status === TaskStatus.FAILED) && (() => {
+            try {
+              const usage = JSON.parse(task.usage_json);
+              const isClaudeCode = 'cost_usd' in usage || 'total_cost_usd' in usage || 'num_turns' in usage;
+              return (
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">
+                    API Usage
+                  </label>
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                    {isClaudeCode ? (
+                      <>
+                        {(usage.cost_usd != null || usage.total_cost_usd != null) && (
+                          <span>
+                            Cost:{' '}
+                            <span className="font-medium">
+                              ${((usage.total_cost_usd ?? usage.cost_usd) as number).toFixed(4)}
+                            </span>
+                          </span>
+                        )}
+                        {usage.num_turns != null && (
+                          <span>
+                            Turns: <span className="font-medium">{usage.num_turns}</span>
+                          </span>
+                        )}
+                        {usage.duration_ms != null && (
+                          <span>
+                            Duration:{' '}
+                            <span className="font-medium">
+                              {((usage.duration_ms as number) / 1000).toFixed(1)}s
+                            </span>
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {usage.input_tokens != null && (
+                          <span>
+                            Input: <span className="font-medium">{(usage.input_tokens as number).toLocaleString()} tokens</span>
+                          </span>
+                        )}
+                        {usage.output_tokens != null && (
+                          <span>
+                            Output: <span className="font-medium">{(usage.output_tokens as number).toLocaleString()} tokens</span>
+                          </span>
+                        )}
+                        {usage.total_tokens != null && (
+                          <span>
+                            Total: <span className="font-medium">{(usage.total_tokens as number).toLocaleString()} tokens</span>
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            } catch {
+              return null;
+            }
+          })()}
         </CardContent>
       </Card>
 

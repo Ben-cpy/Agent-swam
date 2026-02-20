@@ -1,13 +1,19 @@
+import asyncio
+import logging
+import shlex
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from database import get_db, async_session_maker
-from models import Task, TaskStatus, Workspace, Run
+from models import Task, TaskStatus, Workspace, WorkspaceType, Run
 from schemas import TaskCreate, TaskResponse, NextTaskNumberResponse
 from core.executor import TaskExecutor
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -165,7 +171,7 @@ async def delete_task(
     task_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete a task and its related run records."""
+    """Delete a task and its related run records. Also removes the git worktree if present."""
     result = await db.execute(
         select(Task).where(Task.id == task_id)
     )
@@ -176,6 +182,15 @@ async def delete_task(
 
     if task.status == TaskStatus.RUNNING:
         raise HTTPException(status_code=400, detail="Cannot delete a running task. Cancel it first.")
+
+    # Capture worktree info before deletion so we can clean up after
+    worktree_path = task.worktree_path
+    workspace: Optional[Workspace] = None
+    if worktree_path:
+        ws_result = await db.execute(
+            select(Workspace).where(Workspace.workspace_id == task.workspace_id)
+        )
+        workspace = ws_result.scalar_one_or_none()
 
     # Break potential FK cycle before deleting runs.
     task.run_id = None
@@ -191,4 +206,38 @@ async def delete_task(
     await db.delete(task)
     await db.commit()
 
+    # Best-effort worktree cleanup (after DB commit so task deletion is not blocked)
+    if worktree_path and workspace:
+        try:
+            await _remove_worktree(worktree_path, workspace)
+        except Exception as exc:
+            logger.warning("Failed to remove worktree %s for task %s: %s", worktree_path, task_id, exc)
+
     return {"message": "Task deleted successfully"}
+
+
+async def _remove_worktree(worktree_path: str, workspace: Workspace) -> None:
+    """Remove a git worktree directory. For SSH workspaces, executes via SSH."""
+    is_ssh = workspace.workspace_type in (WorkspaceType.SSH, WorkspaceType.SSH_CONTAINER)
+
+    if is_ssh:
+        if not workspace.host:
+            logger.warning("SSH workspace %s has no host; skipping worktree removal", workspace.workspace_id)
+            return
+        ssh_target = f"{workspace.ssh_user}@{workspace.host}" if workspace.ssh_user else workspace.host
+        remote_cmd = f"git worktree remove --force {shlex.quote(worktree_path)}"
+        cmd = ["ssh", ssh_target, remote_cmd]
+    else:
+        # Local workspace
+        cmd = ["git", "worktree", "remove", "--force", worktree_path]
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"git worktree remove exited {proc.returncode}: {stderr.decode(errors='replace').strip()}"
+        )

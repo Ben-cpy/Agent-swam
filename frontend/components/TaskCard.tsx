@@ -7,10 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { formatDistanceToNow } from 'date-fns';
 import { parseUTCDate } from '@/lib/utils';
+import { Trash2 } from 'lucide-react';
+import { taskAPI } from '@/lib/api';
 
 interface TaskCardProps {
   task: Task;
   isQueued?: boolean;
+  onDeleted?: () => void;
 }
 
 function formatElapsed(seconds: number): string {
@@ -23,8 +26,9 @@ function formatElapsed(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-export default function TaskCard({ task, isQueued = false }: TaskCardProps) {
+export default function TaskCard({ task, isQueued = false, onDeleted }: TaskCardProps) {
   const [elapsed, setElapsed] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (task.status !== TaskStatus.RUNNING) {
@@ -64,17 +68,45 @@ export default function TaskCard({ task, isQueued = false }: TaskCardProps) {
     }
   };
 
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm(`Delete task "${task.title}"?`)) return;
+    setDeleting(true);
+    try {
+      await taskAPI.delete(task.id);
+      onDeleted?.();
+    } catch {
+      alert('Failed to delete task');
+      setDeleting(false);
+    }
+  };
+
+  const canDelete = task.status !== TaskStatus.RUNNING;
+
   return (
     <Link href={`/tasks/${task.id}`}>
-      <Card className="py-3 hover:shadow-md transition-shadow cursor-pointer">
+      <Card className="py-3 hover:shadow-md transition-shadow cursor-pointer border shadow-sm">
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
             <CardTitle className="text-sm font-medium line-clamp-2">
               {task.title}
             </CardTitle>
-            <span className="flex-shrink-0 flex items-center justify-center w-7 h-7">
-              {getBackendIcon(task.backend)}
-            </span>
+            <div className="flex-shrink-0 flex items-center gap-1">
+              <span className="flex items-center justify-center w-7 h-7">
+                {getBackendIcon(task.backend)}
+              </span>
+              {canDelete && (
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  title="Delete task"
+                  className="flex items-center justify-center w-6 h-6 rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent className="pt-0 space-y-1">
