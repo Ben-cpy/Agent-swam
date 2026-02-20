@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     max_log_size: int = 10 * 1024 * 1024  # 10MB
 
+    # Task prompt limits
+    prompt_max_chars: int = 65536  # 64 KiB characters
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

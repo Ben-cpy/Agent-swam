@@ -2,12 +2,13 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, List
 from models import TaskStatus, BackendType, RunnerStatus, ErrorClass, WorkspaceType, QuotaStateValue
+from config import settings
 
 
 # Task Schemas
 class TaskBase(BaseModel):
     title: str = Field(..., max_length=500)
-    prompt: str
+    prompt: str = Field(..., max_length=settings.prompt_max_chars)
     workspace_id: int
     backend: BackendType
     branch_name: Optional[str] = Field(None, max_length=200)
@@ -149,7 +150,7 @@ class NextTaskNumberResponse(BaseModel):
 
 
 class TaskContinueRequest(BaseModel):
-    prompt: str
+    prompt: str = Field(..., max_length=settings.prompt_max_chars)
     model: Optional[str] = None
 
 

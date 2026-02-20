@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import { taskAPI, workspaceAPI } from '@/lib/api';
 import { ApiErrorBody, BackendType, Workspace } from '@/lib/types';
+import { MAX_PROMPT_CHARS } from '@/lib/limits';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -107,6 +108,8 @@ export default function TaskForm({ defaultWorkspaceId, lockedWorkspaceId }: Task
 
     if (!formData.prompt.trim()) {
       newErrors.prompt = 'Prompt is required';
+    } else if (formData.prompt.length > MAX_PROMPT_CHARS) {
+      newErrors.prompt = `Prompt must be ${MAX_PROMPT_CHARS.toLocaleString()} characters or fewer`;
     }
 
     if (!formData.workspace_id) {
@@ -261,8 +264,12 @@ export default function TaskForm({ defaultWorkspaceId, lockedWorkspaceId }: Task
               }
               placeholder="Describe the task in detail..."
               rows={6}
+              maxLength={MAX_PROMPT_CHARS}
               className={errors.prompt ? 'border-red-500' : ''}
             />
+            <p className="text-xs text-muted-foreground">
+              {formData.prompt.length.toLocaleString()} / {MAX_PROMPT_CHARS.toLocaleString()}
+            </p>
             {errors.prompt && (
               <p className="text-sm text-red-500">{errors.prompt}</p>
             )}
@@ -271,39 +278,27 @@ export default function TaskForm({ defaultWorkspaceId, lockedWorkspaceId }: Task
           {/* Backend */}
           <div className="space-y-2">
             <Label>Backend</Label>
-            <div className="flex gap-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="backend"
-                  value={BackendType.CLAUDE_CODE}
-                  checked={formData.backend === BackendType.CLAUDE_CODE}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      backend: e.target.value as BackendType,
-                    })
-                  }
-                  className="w-4 h-4"
-                />
-                <span>Claude Code</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="backend"
-                  value={BackendType.CODEX_CLI}
-                  checked={formData.backend === BackendType.CODEX_CLI}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      backend: e.target.value as BackendType,
-                    })
-                  }
-                  className="w-4 h-4"
-                />
-                <span>Codex CLI</span>
-              </label>
+            <div className="flex gap-4 flex-wrap">
+              {[
+                { value: BackendType.CLAUDE_CODE, label: 'Claude Code', icon: '/Claude_AI_symbol.svg' },
+                { value: BackendType.CODEX_CLI, label: 'Codex CLI', icon: '/ChatGPT_logo.svg' },
+                { value: BackendType.COPILOT_CLI, label: 'Copilot', icon: '/copilot.svg' },
+              ].map((opt) => (
+                <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="backend"
+                    value={opt.value}
+                    checked={formData.backend === opt.value}
+                    onChange={(e) =>
+                      setFormData({ ...formData, backend: e.target.value as BackendType })
+                    }
+                    className="w-4 h-4"
+                  />
+                  <img src={opt.icon} alt={opt.label} className="w-4 h-4" />
+                  <span>{opt.label}</span>
+                </label>
+              ))}
             </div>
           </div>
 

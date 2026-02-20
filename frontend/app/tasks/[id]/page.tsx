@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import LogStream from '@/components/LogStream';
 import { formatDistanceToNow } from 'date-fns';
 import { parseUTCDate } from '@/lib/utils';
+import { MAX_PROMPT_CHARS } from '@/lib/limits';
 import { ArrowLeft, GitMerge } from 'lucide-react';
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -103,6 +104,10 @@ export default function TaskDetailPage() {
 
   const handleContinue = async () => {
     if (!continuePrompt.trim()) return;
+    if (continuePrompt.length > MAX_PROMPT_CHARS) {
+      alert(`Prompt is too long. Max ${MAX_PROMPT_CHARS.toLocaleString()} characters.`);
+      return;
+    }
     setContinueLoading(true);
     try {
       await taskAPI.continue(taskId, { prompt: continuePrompt });
@@ -143,7 +148,12 @@ export default function TaskDetailPage() {
   };
 
   const getBackendLabel = (backend: BackendType) => {
-    return backend === BackendType.CLAUDE_CODE ? 'Claude Code' : 'Codex CLI';
+    switch (backend) {
+      case BackendType.CLAUDE_CODE: return 'Claude Code';
+      case BackendType.CODEX_CLI: return 'Codex CLI';
+      case BackendType.COPILOT_CLI: return 'GitHub Copilot';
+      default: return backend;
+    }
   };
 
   if (error) {
@@ -371,6 +381,7 @@ export default function TaskDetailPage() {
       {task.run_id && (
         <LogStream
           runId={task.run_id}
+          backend={task.backend}
           onComplete={() => mutate()}
           headerActions={(
             <div className="flex items-center gap-2">
@@ -426,7 +437,11 @@ export default function TaskDetailPage() {
                 onChange={(e) => setContinuePrompt(e.target.value)}
                 placeholder="Describe what else should be done or corrected..."
                 rows={4}
+                maxLength={MAX_PROMPT_CHARS}
               />
+              <p className="text-xs text-muted-foreground">
+                {continuePrompt.length.toLocaleString()} / {MAX_PROMPT_CHARS.toLocaleString()}
+              </p>
             </div>
             <Button
               onClick={handleContinue}

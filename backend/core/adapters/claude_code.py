@@ -17,12 +17,16 @@ class ClaudeCodeAdapter(BackendAdapter):
         """
         Build Claude Code command with streaming JSON output.
 
-        Format: claude -p --output-format stream-json [--dangerously-skip-permissions | --permission-mode <mode>] [--model <model>] <prompt>
+        Format: claude -p --output-format stream-json --input-format text
+                [--dangerously-skip-permissions | --permission-mode <mode>] [--model <model>]
+
+        Prompt content is provided via stdin to avoid command-line length limits.
         """
         cmd = [
             resolve_cli("claude"),
             "-p",  # Project mode
             "--output-format", "stream-json",
+            "--input-format", "text",
         ]
         mode = self.permission_mode
         if not mode or mode == "bypassPermissions":
@@ -31,7 +35,6 @@ class ClaudeCodeAdapter(BackendAdapter):
             cmd += ["--permission-mode", mode]
         if self.model:
             cmd += ["--model", self.model]
-        cmd.append(prompt)
         return cmd
 
     async def execute(
@@ -62,7 +65,12 @@ class ClaudeCodeAdapter(BackendAdapter):
 
         exit_code = 0
 
-        async for line, code in self.run_subprocess(cmd, env=env, should_terminate=should_terminate):
+        async for line, code in self.run_subprocess(
+            cmd,
+            env=env,
+            stdin_data=prompt,
+            should_terminate=should_terminate,
+        ):
             if line:
                 self._try_parse_stream_json(line)
                 yield line

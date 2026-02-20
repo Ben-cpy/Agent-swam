@@ -54,6 +54,7 @@ class BackendAdapter(ABC):
         self,
         cmd: List[str],
         env: Optional[dict] = None,
+        stdin_data: Optional[str] = None,
         should_terminate: Optional[Callable[[], Union[bool, Awaitable[bool]]]] = None,
     ) -> AsyncIterator[Tuple[str, int]]:
         """
@@ -66,9 +67,17 @@ class BackendAdapter(ABC):
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            stdin=asyncio.subprocess.PIPE if stdin_data is not None else None,
             cwd=self.workspace_path,
             env=env,
         )
+
+        if stdin_data is not None and process.stdin is not None:
+            try:
+                process.stdin.write(stdin_data.encode("utf-8"))
+                await process.stdin.drain()
+            finally:
+                process.stdin.close()
 
         async def _should_terminate() -> bool:
             if should_terminate is None:

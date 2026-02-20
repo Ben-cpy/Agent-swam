@@ -22,7 +22,9 @@ class CodexAdapter(BackendAdapter):
         Build Codex CLI command.
 
         Format: codex exec --json --sandbox danger-full-access --cd <workspace>
-                [--model <model>] [--reasoning-effort <effort>] "<prompt>"
+                [--model <model>] [--reasoning-effort <effort>] -
+
+        Prompt content is provided via stdin to avoid command-line length limits.
         """
         cmd = [
             resolve_cli("codex"),
@@ -36,7 +38,7 @@ class CodexAdapter(BackendAdapter):
             cmd += ["--model", self.model]
         if self.reasoning_effort:
             cmd += ["--reasoning-effort", self.reasoning_effort]
-        cmd.append(prompt)
+        cmd.append("-")
         return cmd
 
     async def execute(
@@ -62,7 +64,11 @@ class CodexAdapter(BackendAdapter):
 
         exit_code = 0
 
-        async for line, code in self.run_subprocess(cmd, should_terminate=should_terminate):
+        async for line, code in self.run_subprocess(
+            cmd,
+            stdin_data=prompt,
+            should_terminate=should_terminate,
+        ):
             if line:
                 self._try_extract_from_jsonl(line)
                 yield line
