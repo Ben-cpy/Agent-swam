@@ -9,6 +9,7 @@ export enum TaskStatus {
 export enum BackendType {
   CLAUDE_CODE = 'claude_code',
   CODEX_CLI = 'codex_cli',
+  COPILOT_CLI = 'copilot_cli',
 }
 
 export enum WorkspaceType {

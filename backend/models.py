@@ -16,6 +16,7 @@ class TaskStatus(str, enum.Enum):
 class BackendType(str, enum.Enum):
     CLAUDE_CODE = "claude_code"
     CODEX_CLI = "codex_cli"
+    COPILOT_CLI = "copilot_cli"
 
 
 class RunnerStatus(str, enum.Enum):

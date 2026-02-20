@@ -9,7 +9,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.adapters import ClaudeCodeAdapter, CodexAdapter
+from core.adapters import ClaudeCodeAdapter, CodexAdapter, CopilotAdapter
 from models import ErrorClass, Run, Runner, Task, TaskStatus, Workspace, WorkspaceType
 
 logger = logging.getLogger(__name__)
@@ -283,6 +283,8 @@ class TaskExecutor:
                 adapter = ClaudeCodeAdapter(workspace_path, model=model, permission_mode=permission_mode)
             elif backend == "codex_cli":
                 adapter = CodexAdapter(workspace_path, model=model)
+            elif backend == "copilot_cli":
+                adapter = CopilotAdapter(workspace_path, model=model)
             else:
                 raise ValueError(f"Unknown backend: {backend}")
 
@@ -370,6 +372,8 @@ class TaskExecutor:
                 cli_cmd = f"claude -p --output-format stream-json {perm_flag} {shlex.quote(prompt)}"
             elif backend == "codex_cli":
                 cli_cmd = f"codex -p {shlex.quote(prompt)}"
+            elif backend == "copilot_cli":
+                cli_cmd = f"copilot -p {shlex.quote(prompt)} --allow-all --no-color --no-alt-screen"
             else:
                 raise ValueError(f"Unknown backend: {backend}")
 

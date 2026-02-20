@@ -19,6 +19,12 @@ type LogEntry =
   | { type: 'codex_command'; command: string; output: string; exitCode: number | null; isError: boolean }
   | { type: 'codex_turn_divider' }
   | { type: 'codex_error'; content: string }
+  // Copilot events
+  | { type: 'copilot_text'; content: string }
+  | { type: 'copilot_tool'; action: string; detail: string }
+  | { type: 'copilot_section'; title: string }
+  | { type: 'copilot_error'; content: string }
+  | { type: 'copilot_stats'; content: string }
   // Common
   | { type: 'plain'; content: string };
 
@@ -27,6 +33,8 @@ interface LogStreamProps {
   initialLogs?: string;
   onComplete?: () => void;
   headerActions?: ReactNode;
+  /** Backend type, used to select the correct log parser */
+  backend?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,8 +184,71 @@ function parseLine(line: string): LogEntry[] {
   }
 }
 
-function processRawLogs(raw: string): LogEntry[] {
-  return raw.split('\n').flatMap((line) => parseLine(line));
+// ---------------------------------------------------------------------------
+// Parse a plain-text line from Copilot CLI output into a structured entry
+//
+// Actual copilot CLI non-interactive output format (--no-color --no-alt-screen):
+//   ● <tool name>               ← tool invocation
+//     └ <result summary>        ← tool result (indented)
+//   <markdown text>             ← AI response
+//   Total usage est:  …         ← stats block
+//   API time spent:   …
+//   Total session time: …
+//   Total code changes: …
+//   Breakdown by AI model:
+//    <model>  … in, … out …
+// ---------------------------------------------------------------------------
+function parseCopilotLine(line: string): LogEntry[] {
+  const trimmed = line.trim();
+  if (!trimmed) return [];
+
+  // Tool invocation: "● <tool name>" (unicode bullet ● U+25CF)
+  const toolInvokeMatch = trimmed.match(/^●\s+(.+)/);
+  if (toolInvokeMatch) {
+    return [{ type: 'copilot_tool', action: '●', detail: toolInvokeMatch[1] }];
+  }
+
+  // Tool result summary: "└ <text>" (indented in source)
+  const toolResultMatch = trimmed.match(/^└\s+(.+)/);
+  if (toolResultMatch) {
+    return [{ type: 'copilot_tool', action: '└', detail: toolResultMatch[1] }];
+  }
+
+  // Stats block lines
+  const statsPatterns = [
+    /^total\s+usage\s+est:/i,
+    /^api\s+time\s+spent:/i,
+    /^total\s+session\s+time:/i,
+    /^total\s+code\s+changes:/i,
+    /^breakdown\s+by\s+ai\s+model:/i,
+    /^\s+[a-z][\w.-]+\s+[\d.]+k?\s+in,/i,  // model breakdown line
+  ];
+  if (statsPatterns.some((p) => p.test(trimmed))) {
+    return [{ type: 'copilot_stats', content: trimmed }];
+  }
+
+  // Error lines
+  if (/^(error|✗|×)\b/i.test(trimmed) || trimmed.toLowerCase().startsWith('[error]')) {
+    return [{ type: 'copilot_error', content: trimmed }];
+  }
+
+  // Default: regular response text
+  return [{ type: 'copilot_text', content: trimmed }];
+}
+
+function processRawLogs(raw: string, backend?: string): LogEntry[] {
+  const isCopilot = backend === 'copilot_cli';
+  return raw.split('\n').flatMap((line) => {
+    const trimmed = line.trim();
+    // Process markers are always rendered as plain entries
+    if (trimmed.startsWith('[Process exited')) {
+      return [{ type: 'plain', content: trimmed }];
+    }
+    if (isCopilot) {
+      return parseCopilotLine(line);
+    }
+    return parseLine(line);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +404,83 @@ function LogEntryView({ entry }: { entry: LogEntry }) {
     );
   }
 
+  // ---- Copilot entries ----
+  if (entry.type === 'copilot_text') {
+    return (
+      <div className="text-slate-50 text-sm mt-2 mb-1 whitespace-pre-wrap break-words leading-relaxed">
+        {entry.content}
+      </div>
+    );
+  }
+
+  if (entry.type === 'copilot_tool') {
+    const isBullet = entry.action === '●';
+    const isResult = entry.action === '└';
+    if (isBullet) {
+      return (
+        <div className="flex items-center gap-2 mt-3 mb-0.5 select-none">
+          <span className="text-purple-400 text-sm">●</span>
+          <span className="text-purple-200 text-xs font-semibold bg-purple-900/30 border border-purple-700/40 px-2 py-0.5 rounded">
+            {entry.detail}
+          </span>
+          <span className="flex-1 h-px bg-purple-800/40" />
+        </div>
+      );
+    }
+    if (isResult) {
+      return (
+        <div className="flex items-center gap-2 mb-1 pl-4 select-none">
+          <span className="text-slate-500 text-xs">└</span>
+          <span className="text-slate-400 text-xs font-mono">{entry.detail}</span>
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center gap-2 mt-2 mb-1 select-none">
+        <span className="text-purple-400 text-xs">{entry.action}</span>
+        <span className="text-slate-300 text-xs font-mono">{entry.detail}</span>
+      </div>
+    );
+  }
+
+  if (entry.type === 'copilot_section') {
+    return (
+      <div className="flex items-center gap-2 mt-5 mb-2">
+        <span className="flex-1 h-px bg-purple-700/50" />
+        <span className="text-purple-300 text-xs font-bold uppercase tracking-widest px-2">
+          {entry.title}
+        </span>
+        <span className="flex-1 h-px bg-purple-700/50" />
+      </div>
+    );
+  }
+
+  if (entry.type === 'copilot_error') {
+    return (
+      <div className="mt-2 p-2 rounded bg-red-950/60 border border-red-700 text-red-200 text-xs font-mono whitespace-pre-wrap break-words">
+        {entry.content}
+      </div>
+    );
+  }
+
+  if (entry.type === 'copilot_stats') {
+    const isHeader = /^breakdown\s+by\s+ai\s+model:/i.test(entry.content);
+    const isModelRow = /^\s*[a-z][\w.-]+\s+[\d.]+/i.test(entry.content) && !isHeader;
+    return (
+      <div
+        className={`text-xs font-mono ${
+          isHeader
+            ? 'mt-3 text-slate-500 font-semibold'
+            : isModelRow
+            ? 'pl-2 text-slate-500'
+            : 'mt-1 text-slate-400'
+        }`}
+      >
+        {entry.content}
+      </div>
+    );
+  }
+
   // Plain text (process markers, stderr, etc.)
   const isProcessMarker =
     entry.content.startsWith('[Process') || entry.content.startsWith('[success]');
@@ -355,9 +503,10 @@ export default function LogStream({
   initialLogs = '',
   onComplete,
   headerActions,
+  backend,
 }: LogStreamProps) {
   const [logs, setLogs] = useState<LogEntry[]>(
-    initialLogs ? processRawLogs(initialLogs) : []
+    initialLogs ? processRawLogs(initialLogs, backend) : []
   );
   const [isComplete, setIsComplete] = useState(false);
   const [exitCode, setExitCode] = useState<number | null>(null);
@@ -387,7 +536,10 @@ export default function LogStream({
       try {
         const data = JSON.parse(e.data);
         if (data.content) {
-          const entries = parseLine(data.content);
+          const isCopilot = backend === 'copilot_cli';
+          const entries = isCopilot
+            ? parseCopilotLine(data.content)
+            : parseLine(data.content);
           if (entries.length) {
             setLogs((prev) => [...prev, ...entries]);
           }
@@ -408,7 +560,7 @@ export default function LogStream({
           .get(runId)
           .then((res) => {
             if (res.data.log_blob) {
-              setLogs(processRawLogs(res.data.log_blob));
+              setLogs(processRawLogs(res.data.log_blob, backend));
             }
           })
           .catch((err) => {
@@ -435,7 +587,7 @@ export default function LogStream({
     return () => {
       eventSource.close();
     };
-  }, [runId, isComplete, reconnectAttempt, onComplete]);
+  }, [runId, isComplete, reconnectAttempt, onComplete, backend]);
 
   // Fetch initial logs if not provided inline
   useEffect(() => {
@@ -444,7 +596,7 @@ export default function LogStream({
         .get(runId)
         .then((res) => {
           if (res.data.log_blob) {
-            setLogs(processRawLogs(res.data.log_blob));
+            setLogs(processRawLogs(res.data.log_blob, backend));
           }
           if (res.data.exit_code != null) {
             setIsComplete(true);
@@ -455,7 +607,7 @@ export default function LogStream({
           console.error('Failed to fetch initial logs:', err);
         });
     }
-  }, [runId, initialLogs]);
+  }, [runId, initialLogs, backend]);
 
   return (
     <Card>

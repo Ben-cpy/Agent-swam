@@ -112,3 +112,33 @@ cd frontend && npm run dev   # http://localhost:3000
 - **必须附上 git commit ID**
 
 **同样的问题不要犯两次！**
+
+# 冲突处理
+
+**Rebase 失败时的处理流程：**
+
+1. 如果是 “unstaged changes” 错误，先 commit 或 stash 当前改动
+2. 如果有 merge conflicts：
+
+   * 查看冲突文件：`git status`
+   * 读取冲突文件内容，理解双方改动意图
+   * 手动解决冲突（保留正确的代码）
+   * `git add <resolved-files>`
+   * `git rebase --continue`
+3. 重复直到 rebase 完成
+
+---
+
+**测试失败时的处理流程：**
+
+1. 运行测试：`npm test`
+2. 如果失败，分析错误信息
+3. 修复代码中的 bug
+4. 重新运行测试，直到全部通过
+5. 提交修复：`git commit -m "fix: ..."`
+
+---
+
+**不要放弃：**
+
+遇到 rebase 或测试失败时，必须解决问题后才能继续，不能直接跳过错误。

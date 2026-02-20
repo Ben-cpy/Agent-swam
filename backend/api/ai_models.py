@@ -26,6 +26,22 @@ CODEX_CLI_MODELS = ["o4-mini", "o3", "o3-mini"]
 CODEX_CLI_REASONING_EFFORTS = ["low", "medium", "high"]
 CODEX_CLI_DEFAULT_MODEL = "o4-mini"
 
+COPILOT_CLI_MODELS = [
+    "claude-sonnet-4.6",
+    "claude-sonnet-4.5",
+    "claude-haiku-4.5",
+    "claude-opus-4.6",
+    "claude-opus-4.5",
+    "claude-sonnet-4",
+    "gpt-5.2",
+    "gpt-5.1",
+    "gpt-5.1-codex",
+    "gpt-5.1-codex-mini",
+    "gpt-4.1",
+    "gemini-3-pro-preview",
+]
+COPILOT_CLI_DEFAULT_MODEL = "claude-sonnet-4.5"
+
 CACHE_TTL_SECONDS = 600  # 10 minutes
 
 # In-memory cache: backend -> {"models": [...], "fetched_at": datetime}
@@ -87,6 +103,12 @@ async def _get_backend_models(backend: str, force_refresh: bool = False) -> Dict
                 "reasoning_efforts": CODEX_CLI_REASONING_EFFORTS,
                 "default": CODEX_CLI_DEFAULT_MODEL,
             }
+        elif backend == "copilot_cli":
+            data = {
+                "backend": "copilot_cli",
+                "models": COPILOT_CLI_MODELS,
+                "default": COPILOT_CLI_DEFAULT_MODEL,
+            }
         else:
             data = {"backend": backend, "models": [], "default": None}
 
@@ -113,7 +135,7 @@ async def list_models(refresh: bool = False):
         ]
     }
     """
-    backends = ["claude_code", "codex_cli"]
+    backends = ["claude_code", "codex_cli", "copilot_cli"]
     results = []
     for backend in backends:
         data = await _get_backend_models(backend, force_refresh=refresh)

@@ -37,11 +37,74 @@ async def get_db():
             await session.close()
 
 
+async def _migrate_tasks_backend_constraint(conn) -> None:
+    """
+    Recreate the tasks table to extend the backend CHECK constraint with copilot_cli.
+    SQLite does not support ALTER TABLE to change constraints, so a full table recreation
+    is needed on existing databases.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    ddl_row = await conn.execute(
+        text("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'")
+    )
+    tasks_ddl = (ddl_row.scalar() or "").lower()
+
+    # Only migrate if there's a CHECK constraint that doesn't include copilot_cli yet
+    needs_migration = (
+        "copilot_cli" not in tasks_ddl
+        and ("claude_code" in tasks_ddl or "codex_cli" in tasks_ddl)
+    )
+    if not needs_migration:
+        return
+
+    logger.info("Migrating tasks table: adding copilot_cli to backend constraint…")
+    await conn.execute(text("PRAGMA foreign_keys=OFF"))
+    await conn.execute(text("ALTER TABLE tasks RENAME TO _tasks_v1_backup"))
+    await conn.execute(text("""
+        CREATE TABLE tasks (
+            id INTEGER NOT NULL,
+            title VARCHAR(500) NOT NULL,
+            prompt TEXT NOT NULL,
+            workspace_id INTEGER NOT NULL,
+            backend VARCHAR(20) NOT NULL,
+            status VARCHAR(20) NOT NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            run_id INTEGER,
+            branch_name VARCHAR(200),
+            worktree_path VARCHAR(1000),
+            model VARCHAR(200),
+            permission_mode VARCHAR(50),
+            PRIMARY KEY (id),
+            CHECK (backend IN ('claude_code', 'codex_cli', 'copilot_cli')),
+            CHECK (status IN ('TODO', 'RUNNING', 'TO_BE_REVIEW', 'DONE', 'FAILED')),
+            FOREIGN KEY(workspace_id) REFERENCES workspaces(workspace_id),
+            FOREIGN KEY(run_id) REFERENCES runs(run_id)
+        )
+    """))
+    await conn.execute(text("""
+        INSERT INTO tasks
+        SELECT id, title, prompt, workspace_id, backend, status,
+               created_at, updated_at, run_id,
+               branch_name, worktree_path, model, permission_mode
+        FROM _tasks_v1_backup
+    """))
+    await conn.execute(text("DROP TABLE _tasks_v1_backup"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_id ON tasks (id)"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_status ON tasks (status)"))
+    await conn.execute(text("PRAGMA foreign_keys=ON"))
+    logger.info("tasks table migration complete")
+
+
 async def init_db():
     """Initialize database tables"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         if settings.database_url.startswith("sqlite"):
+            # Extend backend CHECK constraint to include copilot_cli on existing DBs
+            await _migrate_tasks_backend_constraint(conn)
             result_tasks = await conn.execute(text("PRAGMA table_info(tasks)"))
             task_columns = {row[1] for row in result_tasks.fetchall()}
             if "branch_name" not in task_columns:

@@ -51,6 +51,8 @@ export default function TaskCard({ task, isQueued = false, onDeleted }: TaskCard
         return <img src="/Claude_AI_symbol.svg" alt="Claude" className="w-5 h-5" />;
       case BackendType.CODEX_CLI:
         return <img src="/ChatGPT_logo.svg" alt="Codex" className="w-5 h-5" />;
+      case BackendType.COPILOT_CLI:
+        return <img src="/copilot.svg" alt="Copilot" className="w-5 h-5" />;
       default:
         return <span className="text-xs font-semibold">AI</span>;
     }
@@ -62,6 +64,8 @@ export default function TaskCard({ task, isQueued = false, onDeleted }: TaskCard
         return 'Claude Code';
       case BackendType.CODEX_CLI:
         return 'Codex CLI';
+      case BackendType.COPILOT_CLI:
+        return 'Copilot';
       default:
         return backend;
     }
