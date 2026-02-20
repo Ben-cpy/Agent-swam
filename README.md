@@ -8,9 +8,7 @@
 
 打开 `http://localhost:3000`，你会看到一个类似 Trello 的任务看板：
 
-```
-[ TODO ]  →  [ RUNNING ]  →  [ DONE / FAILED ]
-```
+![界面预览](img/interface.png)
 
 在这里创建任务 → AI 自动执行 → 查看结果和日志。
 
