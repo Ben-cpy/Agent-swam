@@ -512,13 +512,34 @@ export default function LogStream({
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
-  const logsEndRef = useRef<HTMLDivElement>(null);
+  const [stickToBottom, setStickToBottom] = useState(true);
+  const logContainerRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
-  // Auto-scroll to bottom
+  // Keep auto-follow only when user is already near the bottom.
   useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
+    const container = logContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+      setStickToBottom(distanceFromBottom <= 40);
+    };
+
+    handleScroll();
+    container.addEventListener('scroll', handleScroll);
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
+
+  // Auto-scroll only inside log container and only when follow mode is active.
+  useEffect(() => {
+    const container = logContainerRef.current;
+    if (!container || !stickToBottom) return;
+    container.scrollTop = container.scrollHeight;
+  }, [logs, stickToBottom]);
 
   // Setup SSE connection
   useEffect(() => {
@@ -643,7 +664,10 @@ export default function LogStream({
         </div>
       </CardHeader>
       <CardContent>
-        <div className="bg-slate-900 text-slate-50 p-4 rounded-lg font-mono text-sm h-[600px] overflow-y-auto">
+        <div
+          ref={logContainerRef}
+          className="bg-slate-900 text-slate-50 p-4 rounded-lg font-mono text-sm h-[600px] overflow-y-auto"
+        >
           {logs.length === 0 && (
             <div className="text-slate-400 text-sm">
               {isComplete ? 'No logs available.' : 'Waiting for logs…'}
@@ -652,7 +676,6 @@ export default function LogStream({
           {logs.map((entry, index) => (
             <LogEntryView key={index} entry={entry} />
           ))}
-          <div ref={logsEndRef} />
         </div>
       </CardContent>
     </Card>
