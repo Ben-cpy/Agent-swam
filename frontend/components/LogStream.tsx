@@ -142,7 +142,35 @@ function parseLine(line: string): LogEntry[] {
     // All other JSON events — suppress
     return [];
   } catch {
-    // Plain-text line (stdout, stderr, markers like "[Process exited…]")
+    // Plain-text line — also handle legacy Codex pre-formatted output for backward compat
+
+    // Legacy marker-only lines
+    if (trimmed === '[Turn started]') return [{ type: 'codex_turn_divider' }];
+    if (trimmed === '[Turn completed]') return [{ type: 'codex_turn_divider' }];
+
+    // Legacy [Agent] / [Tool] / [ERROR] prefixed lines
+    const agentMatch = trimmed.match(/^\[Agent\] ([\s\S]+)$/);
+    if (agentMatch) return [{ type: 'codex_message', content: agentMatch[1] }];
+
+    const toolMatch = trimmed.match(/^\[Tool\] (.+)$/);
+    if (toolMatch) return [{ type: 'tool_use', name: toolMatch[1].trim() }];
+
+    const errorMatch = trimmed.match(/^\[ERROR\] ([\s\S]+)$/);
+    if (errorMatch) return [{ type: 'codex_error', content: errorMatch[1] }];
+
+    // Legacy "[event_type] {raw json}" lines — extract inner JSON and re-parse
+    const bracketJsonMatch = trimmed.match(/^\[[^\]]+\] (\{[\s\S]+\})$/);
+    if (bracketJsonMatch) {
+      try {
+        const inner = JSON.parse(bracketJsonMatch[1]);
+        return parseLine(JSON.stringify(inner));
+      } catch {
+        // Suppress unrecognized bracket-json lines
+        return [];
+      }
+    }
+
+    // stdout, stderr, process markers, etc.
     return [{ type: 'plain', content: trimmed }];
   }
 }
