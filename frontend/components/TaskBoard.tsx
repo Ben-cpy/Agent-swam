@@ -8,7 +8,7 @@ interface TaskBoardProps {
 }
 
 const statusColumns = [
-  { status: TaskStatus.TODO, label: 'To Do', bgColor: 'bg-slate-100' },
+  { status: TaskStatus.TODO, label: 'Queuing', bgColor: 'bg-slate-100' },
   { status: TaskStatus.RUNNING, label: 'Running', bgColor: 'bg-blue-100' },
   { status: TaskStatus.DONE, label: 'Done', bgColor: 'bg-green-100' },
   { status: TaskStatus.FAILED, label: 'Failed', bgColor: 'bg-red-100' },
@@ -58,7 +58,7 @@ export default function TaskBoard({ tasks }: TaskBoardProps) {
             </div>
 
             {/* Column Content */}
-            <div className="flex-1 bg-slate-50 rounded-b-lg p-3 space-y-5 min-h-[200px]">
+            <div className="flex-1 bg-slate-50 rounded-b-lg p-3 space-y-3 min-h-[120px] max-h-[600px] overflow-y-auto">
               {columnTasks.length === 0 ? (
                 <div className="text-center text-sm text-muted-foreground py-8">
                   No tasks

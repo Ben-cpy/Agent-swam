@@ -34,7 +34,7 @@ export default function TaskDetailPage() {
     `/tasks/${taskId}`,
     () => taskAPI.get(taskId),
     {
-      refreshInterval: 3000,
+      refreshInterval: 2000,
       revalidateOnFocus: true,
     }
   );

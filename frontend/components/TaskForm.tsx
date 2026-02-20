@@ -159,6 +159,37 @@ export default function TaskForm() {
             </div>
           )}
 
+          {/* Workspace */}
+          <div className="space-y-2">
+            <Label htmlFor="workspace">
+              Workspace <span className="text-red-500">*</span>
+            </Label>
+            <Select
+              value={formData.workspace_id}
+              onValueChange={(value) => {
+                setFormData({ ...formData, workspace_id: value });
+                fetchSuggestedTitle(value);
+              }}
+            >
+              <SelectTrigger className={errors.workspace_id ? 'border-red-500' : ''}>
+                <SelectValue placeholder="Select a workspace" />
+              </SelectTrigger>
+              <SelectContent>
+                {workspaces.map((ws) => (
+                  <SelectItem
+                    key={ws.workspace_id}
+                    value={ws.workspace_id.toString()}
+                  >
+                    {ws.display_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {errors.workspace_id && (
+              <p className="text-sm text-red-500">{errors.workspace_id}</p>
+            )}
+          </div>
+
           {/* Title */}
           <div className="space-y-2">
             <Label htmlFor="title">
@@ -196,37 +227,6 @@ export default function TaskForm() {
             />
             {errors.prompt && (
               <p className="text-sm text-red-500">{errors.prompt}</p>
-            )}
-          </div>
-
-          {/* Workspace */}
-          <div className="space-y-2">
-            <Label htmlFor="workspace">
-              Workspace <span className="text-red-500">*</span>
-            </Label>
-            <Select
-              value={formData.workspace_id}
-              onValueChange={(value) => {
-                setFormData({ ...formData, workspace_id: value });
-                fetchSuggestedTitle(value);
-              }}
-            >
-              <SelectTrigger className={errors.workspace_id ? 'border-red-500' : ''}>
-                <SelectValue placeholder="Select a workspace" />
-              </SelectTrigger>
-              <SelectContent>
-                {workspaces.map((ws) => (
-                  <SelectItem
-                    key={ws.workspace_id}
-                    value={ws.workspace_id.toString()}
-                  >
-                    {ws.display_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {errors.workspace_id && (
-              <p className="text-sm text-red-500">{errors.workspace_id}</p>
             )}
           </div>
 

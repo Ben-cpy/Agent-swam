@@ -9,9 +9,92 @@ interface LogStreamProps {
   initialLogs?: string;
 }
 
+/**
+ * Filter a raw log line to extract human-readable content.
+ * Claude Code emits structured JSON events mixed with plain text.
+ * We keep only what's meaningful for the user.
+ */
+function filterLogLine(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+
+  // Try to parse as JSON
+  try {
+    const obj = JSON.parse(trimmed);
+
+    // Claude Code SDK JSON event types — extract useful content
+    const type: string = obj.type ?? '';
+
+    // Skip purely internal/bookkeeping events
+    if (
+      type === 'system' ||
+      type === 'debug' ||
+      type === 'ping' ||
+      type === 'rate_limit_event'
+    ) {
+      return null;
+    }
+
+    // Assistant text message
+    if (type === 'assistant' && obj.message?.content) {
+      const parts: string[] = [];
+      for (const block of obj.message.content) {
+        if (block.type === 'text' && block.text) {
+          parts.push(block.text);
+        } else if (block.type === 'tool_use') {
+          parts.push(`[Tool: ${block.name}]`);
+        }
+      }
+      return parts.length ? parts.join('\n') : null;
+    }
+
+    // Tool result / user message
+    if (type === 'user' && obj.message?.content) {
+      const parts: string[] = [];
+      for (const block of obj.message.content) {
+        if (block.type === 'tool_result') {
+          const content = Array.isArray(block.content)
+            ? block.content
+                .filter((c: { type: string; text?: string }) => c.type === 'text')
+                .map((c: { type: string; text?: string }) => c.text)
+                .join('\n')
+            : typeof block.content === 'string'
+            ? block.content
+            : null;
+          if (content) parts.push(content);
+        }
+      }
+      return parts.length ? parts.join('\n') : null;
+    }
+
+    // Result / summary event
+    if (type === 'result') {
+      const lines: string[] = [];
+      if (obj.subtype) lines.push(`[${obj.subtype}]`);
+      if (obj.result) lines.push(obj.result);
+      if (obj.error) lines.push(`Error: ${obj.error}`);
+      return lines.length ? lines.join(' ') : null;
+    }
+
+    // For any other JSON events, suppress them (internal SDK bookkeeping)
+    return null;
+  } catch {
+    // Not JSON — plain text line, keep as-is
+    return trimmed;
+  }
+}
+
+function processRawLogs(raw: string): string[] {
+  return raw.split('\n').flatMap((line) => {
+    const filtered = filterLogLine(line);
+    if (!filtered) return [];
+    return filtered.split('\n').filter(Boolean);
+  });
+}
+
 export default function LogStream({ runId, initialLogs = '' }: LogStreamProps) {
   const [logs, setLogs] = useState<string[]>(
-    initialLogs ? initialLogs.split('\n').filter(Boolean) : []
+    initialLogs ? processRawLogs(initialLogs) : []
   );
   const [isComplete, setIsComplete] = useState(false);
   const [exitCode, setExitCode] = useState<number | null>(null);
@@ -42,7 +125,11 @@ export default function LogStream({ runId, initialLogs = '' }: LogStreamProps) {
       try {
         const data = JSON.parse(e.data);
         if (data.content) {
-          setLogs((prev) => [...prev, data.content]);
+          const filtered = filterLogLine(data.content);
+          if (filtered) {
+            const lines = filtered.split('\n').filter(Boolean);
+            setLogs((prev) => [...prev, ...lines]);
+          }
         }
       } catch (err) {
         console.error('Failed to parse log event:', err);
@@ -87,7 +174,7 @@ export default function LogStream({ runId, initialLogs = '' }: LogStreamProps) {
       logAPI.get(runId)
         .then((res) => {
           if (res.data.log_blob) {
-            setLogs(res.data.log_blob.split('\n').filter(Boolean));
+            setLogs(processRawLogs(res.data.log_blob));
           }
           if (res.data.exit_code != null) {
             setIsComplete(true);

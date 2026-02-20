@@ -13,7 +13,7 @@ export default function Home() {
     '/tasks',
     () => taskAPI.list(),
     {
-      refreshInterval: 3000,
+      refreshInterval: 2000,
       revalidateOnFocus: true,
     }
   );
