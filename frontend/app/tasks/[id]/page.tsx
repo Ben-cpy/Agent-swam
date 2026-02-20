@@ -321,7 +321,7 @@ export default function TaskDetailPage() {
       </Card>
 
       {/* Logs */}
-      {task.run_id && <LogStream runId={task.run_id} />}
+      {task.run_id && <LogStream runId={task.run_id} onComplete={() => mutate()} />}
       {!task.run_id && task.status === TaskStatus.TODO && (
         <Card>
           <CardContent className="py-12 text-center">

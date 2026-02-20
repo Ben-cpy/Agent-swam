@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 interface LogStreamProps {
   runId: number;
   initialLogs?: string;
+  onComplete?: () => void;
 }
 
 /**
@@ -92,7 +93,7 @@ function processRawLogs(raw: string): string[] {
   });
 }
 
-export default function LogStream({ runId, initialLogs = '' }: LogStreamProps) {
+export default function LogStream({ runId, initialLogs = '', onComplete }: LogStreamProps) {
   const [logs, setLogs] = useState<string[]>(
     initialLogs ? processRawLogs(initialLogs) : []
   );
@@ -140,10 +141,24 @@ export default function LogStream({ runId, initialLogs = '' }: LogStreamProps) {
     eventSource.addEventListener('complete', (e) => {
       try {
         const data = JSON.parse(e.data);
-        setIsComplete(true);
         setExitCode(data.exit_code ?? null);
         console.log('Task completed with exit code:', data.exit_code);
         eventSource.close();
+
+        // Re-fetch the full log to ensure final content (e.g. API usage) is shown
+        logAPI.get(runId)
+          .then((res) => {
+            if (res.data.log_blob) {
+              setLogs(processRawLogs(res.data.log_blob));
+            }
+          })
+          .catch((err) => {
+            console.error('Failed to fetch final logs:', err);
+          })
+          .finally(() => {
+            setIsComplete(true);
+            onComplete?.();
+          });
       } catch (err) {
         console.error('Failed to parse complete event:', err);
       }
