@@ -68,6 +68,7 @@ class CodexAdapter(BackendAdapter):
             cmd,
             stdin_data=prompt,
             should_terminate=should_terminate,
+            cli_name="codex",
         ):
             if line:
                 self._try_extract_from_jsonl(line)

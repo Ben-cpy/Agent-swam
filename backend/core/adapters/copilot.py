@@ -50,7 +50,11 @@ class CopilotAdapter(BackendAdapter):
 
         exit_code = 0
 
-        async for line, code in self.run_subprocess(cmd, should_terminate=should_terminate):
+        async for line, code in self.run_subprocess(
+            cmd,
+            should_terminate=should_terminate,
+            cli_name="copilot",
+        ):
             if line:
                 self._scan_for_quota_keywords(line)
                 yield line

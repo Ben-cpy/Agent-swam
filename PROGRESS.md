@@ -33,6 +33,11 @@
   - 问题：任务详情页日志持续更新时，组件每次通过 `scrollIntoView` 触发整页滚动，导致页面焦点频繁被拖回日志区，影响用户在主界面操作。
   - 解决：`LogStream` 改为监听日志容器滚动位置，仅在“用户当前接近底部”时自动跟随，且只滚动日志容器自身（`scrollTop`），不再驱动页面滚动。
   - 避免复发：流式日志/聊天窗口类组件统一采用“sticky-to-bottom”策略，不直接在更新时调用可能影响整页滚动的 `scrollIntoView`。
+* **Windows CLI shell 优先级回退（5777682，2026-02-20）**：
+  - 问题：在 Windows 环境下，CLI 执行链路缺少显式 shell 优先级策略，用户希望固定优先使用 Git Bash，并在不可用时自动回退。
+  - 解决：在 `backend/core/adapters/cli_resolver.py` 新增 shell 探测与命令变体构建（git-bash > cmd > powershell），并在 `BackendAdapter.run_subprocess` 中按优先级尝试执行；命令不可用时自动回退，最终保留 direct exec 兜底；`claude/codex/copilot` 适配器均接入 `cli_name`。
+  - 避免复发：Windows 端新增 CLI 或调整执行器时，统一走同一套 shell-priority 解析逻辑，禁止在各适配器内各自实现 shell 选择。
+  - Commit: `5777682`
 * **FAILED 任务重试复用同一 Task/Worktree（62bcfdd，2026-02-20）**：
   - 问题：任务详情页点击 Retry 会创建新任务（标题追加 Retry）并新建 worktree，导致同一失败任务上下文被拆分。
   - 解决：将 `POST /api/tasks/{id}/retry` 改为原任务原地重排队（`FAILED -> TODO`），复用既有 `worktree_path`，且不再创建新 Task；前端 Retry 改为留在当前任务页并 `mutate()` 刷新状态。

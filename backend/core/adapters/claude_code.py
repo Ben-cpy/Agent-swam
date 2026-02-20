@@ -70,6 +70,7 @@ class ClaudeCodeAdapter(BackendAdapter):
             env=env,
             stdin_data=prompt,
             should_terminate=should_terminate,
+            cli_name="claude",
         ):
             if line:
                 self._try_parse_stream_json(line)
