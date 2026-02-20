@@ -1,4 +1,8 @@
-﻿* **task-14 合并入主分支（447b446，2026-02-20）**：  
+﻿* **Copilot 任务卡队列修复（396fadd，2026-02-20）**：
+  - 问题：copilot_cli 任务持续停留在 TODO/Queue，scheduler 周期性告警 “Runner does not support backend copilot_cli”。
+  - 解决：LocalRunnerAgent 的 runner capabilities 改为从 BackendType 枚举动态生成，确保包含 copilot_cli；同时给 scheduler 增加“不支持 backend”告警去重，避免每轮刷屏。
+  - 避免复发：新增 backend 时统一从单一枚举源派生能力列表，禁止在 runner 注册里写死字符串常量。
+* **task-14 合并入主分支（447b446，2026-02-20）**：  
   - 问题：`task-14` 与 `main` 已分叉，需把“一键合并”功能安全并入主线。  
   - 解决：在 `main` worktree 执行 `git merge --no-ff task-14`，完成后端 merge API 与前端按钮改动合入，生成 merge commit `447b446`。  
   - 避免复发：后续同类任务统一先检查 `git worktree list` 和分叉计数，再在目标分支所在 worktree 完成合并。  
@@ -25,3 +29,4 @@
   - 问题：Windows 下将超长 prompt 作为命令行参数传给 claude/codex 时，任务会快速失败（命令行长度上限风险）。
   - 解决：后端适配器改为通过 stdin 传入 prompt（codex exec - + claude --input-format text），并在前后端统一 prompt_max_chars=65536 校验与计数提示。
   - 避免复发：后续对大文本输入统一采用 stdin/文件通道，不再依赖命令行参数承载长内容；长度阈值统一由配置常量管理。
+
