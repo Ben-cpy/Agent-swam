@@ -32,6 +32,7 @@ export default function Home() {
         {
           [TaskStatus.TODO]: wsTasks.filter((t) => t.status === TaskStatus.TODO).length,
           [TaskStatus.RUNNING]: wsTasks.filter((t) => t.status === TaskStatus.RUNNING).length,
+          [TaskStatus.TO_BE_REVIEW]: wsTasks.filter((t) => t.status === TaskStatus.TO_BE_REVIEW).length,
           [TaskStatus.DONE]: wsTasks.filter((t) => t.status === TaskStatus.DONE).length,
           [TaskStatus.FAILED]: wsTasks.filter((t) => t.status === TaskStatus.FAILED).length,
         },
@@ -92,6 +93,7 @@ export default function Home() {
                 countsByWorkspace[ws.workspace_id] ?? {
                   [TaskStatus.TODO]: 0,
                   [TaskStatus.RUNNING]: 0,
+                  [TaskStatus.TO_BE_REVIEW]: 0,
                   [TaskStatus.DONE]: 0,
                   [TaskStatus.FAILED]: 0,
                 }

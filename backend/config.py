@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # Runner
     runner_env: str = "local-windows"
-    max_parallel: int = 1
+    max_parallel: int = 3
 
     # Logging
     log_level: str = "INFO"

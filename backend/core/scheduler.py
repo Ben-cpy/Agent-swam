@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 from models import Task, Workspace, Runner, TaskStatus, RunnerStatus
 from core.executor import TaskExecutor
 from datetime import datetime, timedelta, timezone
@@ -14,9 +14,10 @@ class TaskScheduler:
     """
     Task scheduler that periodically checks for TODO tasks and dispatches them to executors.
 
-    M1 Implementation:
+    M1+ Implementation:
     - Runs every N seconds (configurable)
-    - Enforces serial execution per workspace (concurrency_limit = 1)
+    - Enforces per-workspace concurrency limits
+    - Enforces per-runner parallel limits
     - Checks runner availability
     - Simple FIFO scheduling
     """
@@ -89,9 +90,10 @@ class TaskScheduler:
         Try to dispatch a single task.
 
         Checks:
-        1. Workspace has no RUNNING tasks (serial constraint)
+        1. Workspace RUNNING count is below workspace concurrency limit
         2. Runner is ONLINE
         3. Runner supports the task's backend
+        4. Runner RUNNING count is below runner max_parallel
 
         Returns:
             bool: True if task was dispatched
@@ -106,18 +108,25 @@ class TaskScheduler:
             logger.warning(f"Workspace {task.workspace_id} not found for task {task.id}")
             return False
 
-        # Check if workspace has any RUNNING tasks
+        workspace_limit = max(1, workspace.concurrency_limit or 1)
+
+        # Check workspace RUNNING count against concurrency limit
         result = await db.execute(
-            select(Task)
+            select(func.count(Task.id))
             .where(and_(
                 Task.workspace_id == workspace.workspace_id,
                 Task.status == TaskStatus.RUNNING
             ))
         )
-        running_tasks = result.scalars().all()
+        running_count = int(result.scalar() or 0)
 
-        if running_tasks:
-            logger.debug(f"Workspace {workspace.workspace_id} has {len(running_tasks)} running tasks, skipping")
+        if running_count >= workspace_limit:
+            logger.debug(
+                "Workspace %s reached concurrency limit %s (running=%s), skipping",
+                workspace.workspace_id,
+                workspace_limit,
+                running_count,
+            )
             return False
 
         # Fetch runner
@@ -138,6 +147,26 @@ class TaskScheduler:
         # Check runner capabilities
         if task.backend.value not in runner.capabilities:
             logger.warning(f"Runner {runner.runner_id} does not support backend {task.backend}")
+            return False
+
+        runner_limit = max(1, runner.max_parallel or 1)
+        runner_running_result = await db.execute(
+            select(func.count(Task.id))
+            .select_from(Task)
+            .join(Workspace, Workspace.workspace_id == Task.workspace_id)
+            .where(
+                Workspace.runner_id == runner.runner_id,
+                Task.status == TaskStatus.RUNNING,
+            )
+        )
+        runner_running_count = int(runner_running_result.scalar() or 0)
+        if runner_running_count >= runner_limit:
+            logger.debug(
+                "Runner %s reached max_parallel %s (running=%s), skipping",
+                runner.runner_id,
+                runner_limit,
+                runner_running_count,
+            )
             return False
 
         # All checks passed, dispatch task

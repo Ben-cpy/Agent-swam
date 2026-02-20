@@ -8,6 +8,7 @@ from database import Base
 class TaskStatus(str, enum.Enum):
     TODO = "TODO"
     RUNNING = "RUNNING"
+    TO_BE_REVIEW = "TO_BE_REVIEW"
     DONE = "DONE"
     FAILED = "FAILED"
 
@@ -87,7 +88,7 @@ class Workspace(Base):
     ssh_user = Column(String(100), nullable=True)
     container_name = Column(String(200), nullable=True)
     runner_id = Column(Integer, ForeignKey("runners.runner_id"), nullable=False)
-    concurrency_limit = Column(Integer, default=1, nullable=False)  # M1: fixed to 1
+    concurrency_limit = Column(Integer, default=3, nullable=False)
 
     # Relationships
     runner = relationship("Runner", back_populates="workspaces")
@@ -102,7 +103,7 @@ class Runner(Base):
     capabilities = Column(JSON, nullable=False)  # List of supported backends
     heartbeat_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     status = Column(SQLEnum(RunnerStatus), default=RunnerStatus.ONLINE, nullable=False)
-    max_parallel = Column(Integer, default=1, nullable=False)  # M1: fixed to 1
+    max_parallel = Column(Integer, default=3, nullable=False)
 
     # Relationships
     workspaces = relationship("Workspace", back_populates="runner")
@@ -146,3 +147,17 @@ class QuotaState(Base):
     )
     last_event_at = Column(DateTime, nullable=True)
     note = Column(Text, nullable=True)
+
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String(100), nullable=False, unique=True, index=True)
+    value = Column(String(500), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )

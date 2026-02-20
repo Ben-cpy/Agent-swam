@@ -508,7 +508,7 @@ class TaskExecutor:
             else:
                 run.exit_code = exit_code
                 if success:
-                    task.status = TaskStatus.DONE
+                    task.status = TaskStatus.TO_BE_REVIEW
                     run.error_class = None
                 else:
                     task.status = TaskStatus.FAILED

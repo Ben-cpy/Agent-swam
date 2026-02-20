@@ -172,3 +172,11 @@ class WorkspaceResourcesResponse(BaseModel):
     gpu: Optional[List[GpuInfo]] = None
     gpu_available: bool
     memory: Optional[MemoryInfo] = None
+
+
+class AppSettingsResponse(BaseModel):
+    workspace_max_parallel: int
+
+
+class AppSettingsUpdate(BaseModel):
+    workspace_max_parallel: int = Field(..., ge=1, le=20)

@@ -46,6 +46,11 @@ export default function WorkspaceCard({ workspace, taskCounts }: WorkspaceCardPr
                   Running: {taskCounts[TaskStatus.RUNNING]}
                 </span>
               )}
+              {taskCounts[TaskStatus.TO_BE_REVIEW] > 0 && (
+                <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full">
+                  To be Review: {taskCounts[TaskStatus.TO_BE_REVIEW]}
+                </span>
+              )}
               {taskCounts[TaskStatus.DONE] > 0 && (
                 <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
                   Done: {taskCounts[TaskStatus.DONE]}

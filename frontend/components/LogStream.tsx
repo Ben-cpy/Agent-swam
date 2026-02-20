@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { logAPI } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -26,6 +26,7 @@ interface LogStreamProps {
   runId: number;
   initialLogs?: string;
   onComplete?: () => void;
+  headerActions?: ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -349,7 +350,12 @@ function LogEntryView({ entry }: { entry: LogEntry }) {
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
-export default function LogStream({ runId, initialLogs = '', onComplete }: LogStreamProps) {
+export default function LogStream({
+  runId,
+  initialLogs = '',
+  onComplete,
+  headerActions,
+}: LogStreamProps) {
   const [logs, setLogs] = useState<LogEntry[]>(
     initialLogs ? processRawLogs(initialLogs) : []
   );
@@ -429,7 +435,7 @@ export default function LogStream({ runId, initialLogs = '', onComplete }: LogSt
     return () => {
       eventSource.close();
     };
-  }, [runId, isComplete, reconnectAttempt]);
+  }, [runId, isComplete, reconnectAttempt, onComplete]);
 
   // Fetch initial logs if not provided inline
   useEffect(() => {
@@ -457,6 +463,7 @@ export default function LogStream({ runId, initialLogs = '', onComplete }: LogSt
         <div className="flex items-center justify-between">
           <CardTitle>Execution Logs</CardTitle>
           <div className="flex items-center gap-2">
+            {headerActions}
             {!isComplete && (
               <div className="flex items-center gap-2">
                 <div

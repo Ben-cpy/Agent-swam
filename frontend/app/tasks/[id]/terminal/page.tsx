@@ -5,7 +5,6 @@ import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { taskAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { WorkspaceType } from '@/lib/types';
 
 // Dynamically import xterm to avoid SSR issues
 let Terminal: typeof import('@xterm/xterm').Terminal | undefined;
@@ -166,13 +165,6 @@ export default function TaskTerminalPage() {
       </div>
     );
   }
-
-  const isSSHWorkspace =
-    task?.workspace_id !== undefined &&
-    (task as { workspace_type?: WorkspaceType }).workspace_type &&
-    [(WorkspaceType.SSH as string), (WorkspaceType.SSH_CONTAINER as string)].includes(
-      (task as { workspace_type?: string }).workspace_type ?? ''
-    );
 
   const tmuxSession = task ? `aitask-${task.id}` : '';
 

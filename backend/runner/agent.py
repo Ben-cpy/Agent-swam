@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from core.settings_service import get_workspace_max_parallel
 from models import Runner, RunnerStatus
 from datetime import datetime, timezone
 from config import settings
@@ -24,6 +25,8 @@ class LocalRunnerAgent:
         Returns:
             Runner: The registered/updated runner instance
         """
+        max_parallel = await get_workspace_max_parallel(db)
+
         # Check if local runner already exists
         result = await db.execute(
             select(Runner).where(Runner.env == settings.runner_env)
@@ -35,7 +38,7 @@ class LocalRunnerAgent:
             runner.status = RunnerStatus.ONLINE
             runner.heartbeat_at = datetime.now(timezone.utc)
             runner.capabilities = ["claude_code", "codex_cli"]
-            runner.max_parallel = settings.max_parallel
+            runner.max_parallel = max_parallel
             logger.info(f"✓ Local runner updated (ID: {runner.runner_id})")
         else:
             # Create new runner
@@ -44,7 +47,7 @@ class LocalRunnerAgent:
                 capabilities=["claude_code", "codex_cli"],
                 status=RunnerStatus.ONLINE,
                 heartbeat_at=datetime.now(timezone.utc),
-                max_parallel=settings.max_parallel
+                max_parallel=max_parallel
             )
             db.add(runner)
             await db.flush()

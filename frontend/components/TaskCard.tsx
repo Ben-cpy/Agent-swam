@@ -32,7 +32,6 @@ export default function TaskCard({ task, isQueued = false, onDeleted }: TaskCard
 
   useEffect(() => {
     if (task.status !== TaskStatus.RUNNING) {
-      setElapsed(null);
       return;
     }
 

@@ -27,22 +27,8 @@ def _set_task_for_requeue(task: Task, prompt: str, model: Optional[str] = None) 
     task.updated_at = datetime.now(timezone.utc)
 
 
-def _build_merge_prompt(task_id: int, base_branch: Optional[str]) -> str:
-    target_branch = (base_branch or "main").strip() or "main"
-    task_branch = f"task-{task_id}"
-    return f"""You are working inside the existing task worktree.
-Goal: merge branch `{task_branch}` back into base branch `{target_branch}`.
-
-Required steps:
-1. Review current git status and commit any intended local changes on `{task_branch}`.
-2. Merge `{task_branch}` into `{target_branch}`.
-3. If conflicts happen, resolve them proactively and complete the merge.
-4. Run the most relevant minimal validation commands (tests/build/lint) to verify result.
-5. Final output must include:
-   - merge success/failure
-   - conflict resolution summary (if any)
-   - validation commands and results
-"""
+def _get_task_branch(task_id: int) -> str:
+    return f"task-{task_id}"
 
 
 @router.post("", response_model=TaskResponse, status_code=201)
@@ -216,10 +202,10 @@ async def continue_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if task.status not in (TaskStatus.DONE, TaskStatus.FAILED):
+    if task.status not in (TaskStatus.TO_BE_REVIEW, TaskStatus.DONE, TaskStatus.FAILED):
         raise HTTPException(
             status_code=400,
-            detail="Only DONE or FAILED tasks can be continued"
+            detail="Only TO_BE_REVIEW, DONE or FAILED tasks can be continued"
         )
 
     _set_task_for_requeue(task, body.prompt, body.model)
@@ -236,9 +222,8 @@ async def merge_task(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Continue a completed or failed task with a fixed merge prompt.
-    This reuses the same worktree and asks the backend tool to merge
-    task branch changes back to the task base branch.
+    Merge task worktree branch back to base branch directly.
+    On success, cleanup the task worktree and mark task as DONE.
     """
     result = await db.execute(
         select(Task).where(Task.id == task_id)
@@ -248,10 +233,10 @@ async def merge_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if task.status not in (TaskStatus.DONE, TaskStatus.FAILED):
+    if task.status != TaskStatus.TO_BE_REVIEW:
         raise HTTPException(
             status_code=400,
-            detail="Only DONE or FAILED tasks can be merged"
+            detail="Only TO_BE_REVIEW tasks can be merged"
         )
 
     if not task.worktree_path:
@@ -260,9 +245,29 @@ async def merge_task(
             detail="Task has no worktree; merge action is only available for worktree tasks"
         )
 
-    merge_prompt = _build_merge_prompt(task.id, task.branch_name)
-    _set_task_for_requeue(task, merge_prompt)
+    workspace_result = await db.execute(
+        select(Workspace).where(Workspace.workspace_id == task.workspace_id)
+    )
+    workspace = workspace_result.scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=400, detail="Workspace not found")
 
+    target_branch = (task.branch_name or "main").strip() or "main"
+    task_branch = _get_task_branch(task.id)
+
+    try:
+        if workspace.workspace_type in (WorkspaceType.SSH, WorkspaceType.SSH_CONTAINER):
+            await _merge_on_ssh_workspace(workspace, task.worktree_path, target_branch, task_branch)
+        else:
+            await _merge_on_local_workspace(workspace, task.worktree_path, target_branch, task_branch)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await _remove_worktree(task_id, task.worktree_path, workspace)
+
+    task.status = TaskStatus.DONE
+    task.worktree_path = None
+    task.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(task)
 
@@ -316,15 +321,143 @@ async def delete_task(
     return {"message": "Task deleted successfully"}
 
 
-async def _run_cmd(cmd: list) -> tuple[int, str]:
-    """Run a subprocess command, return (returncode, stderr_text)."""
+async def _run_cmd_capture(cmd: list[str]) -> tuple[int, str, str]:
+    """Run a subprocess command, return (returncode, stdout_text, stderr_text)."""
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    _stdout, stderr = await proc.communicate()
-    return proc.returncode, stderr.decode(errors="replace").strip()
+    stdout, stderr = await proc.communicate()
+    return (
+        proc.returncode,
+        stdout.decode(errors="replace").strip(),
+        stderr.decode(errors="replace").strip(),
+    )
+
+
+async def _run_cmd(cmd: list[str]) -> tuple[int, str]:
+    """Run a subprocess command, return (returncode, stderr_text)."""
+    rc, _stdout, stderr = await _run_cmd_capture(cmd)
+    return rc, stderr
+
+
+async def _run_ssh_cmd(ssh_target: str, cmd: str) -> tuple[int, str, str]:
+    proc = await asyncio.create_subprocess_exec(
+        "ssh",
+        ssh_target,
+        cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    return (
+        proc.returncode,
+        stdout.decode(errors="replace").strip(),
+        stderr.decode(errors="replace").strip(),
+    )
+
+
+async def _merge_on_local_workspace(
+    workspace: Workspace,
+    worktree_path: str,
+    target_branch: str,
+    task_branch: str,
+) -> None:
+    rc, out, err = await _run_cmd_capture(["git", "-C", worktree_path, "status", "--porcelain"])
+    if rc != 0:
+        raise RuntimeError(f"Failed to inspect task worktree status: {err}")
+    if out:
+        raise RuntimeError("Task worktree has uncommitted changes; please continue task and commit first")
+
+    rc, out, err = await _run_cmd_capture(["git", "-C", workspace.path, "status", "--porcelain"])
+    if rc != 0:
+        raise RuntimeError(f"Failed to inspect base workspace status: {err}")
+    if out:
+        raise RuntimeError("Base workspace has uncommitted changes; please clean it before merge")
+
+    rc, _out, err = await _run_cmd_capture(["git", "-C", workspace.path, "rev-parse", "--verify", target_branch])
+    if rc != 0:
+        raise RuntimeError(f"Base branch '{target_branch}' not found: {err}")
+
+    rc, _out, err = await _run_cmd_capture(["git", "-C", workspace.path, "rev-parse", "--verify", task_branch])
+    if rc != 0:
+        raise RuntimeError(f"Task branch '{task_branch}' not found: {err}")
+
+    rc, _out, err = await _run_cmd_capture(["git", "-C", workspace.path, "checkout", target_branch])
+    if rc != 0:
+        raise RuntimeError(f"Failed to checkout base branch '{target_branch}': {err}")
+
+    rc, _out, err = await _run_cmd_capture(
+        ["git", "-C", workspace.path, "merge", "--no-ff", "--no-edit", task_branch]
+    )
+    if rc != 0:
+        await _run_cmd_capture(["git", "-C", workspace.path, "merge", "--abort"])
+        raise RuntimeError(f"Merge failed: {err}")
+
+
+async def _merge_on_ssh_workspace(
+    workspace: Workspace,
+    worktree_path: str,
+    target_branch: str,
+    task_branch: str,
+) -> None:
+    if not workspace.host:
+        raise RuntimeError("SSH workspace host is missing")
+
+    ssh_target = (
+        f"{workspace.ssh_user}@{workspace.host}" if workspace.ssh_user else workspace.host
+    )
+
+    rc, out, err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(worktree_path)} status --porcelain",
+    )
+    if rc != 0:
+        raise RuntimeError(f"Failed to inspect task worktree status (ssh): {err}")
+    if out:
+        raise RuntimeError("Task worktree has uncommitted changes; please continue task and commit first")
+
+    rc, out, err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(workspace.path)} status --porcelain",
+    )
+    if rc != 0:
+        raise RuntimeError(f"Failed to inspect base workspace status (ssh): {err}")
+    if out:
+        raise RuntimeError("Base workspace has uncommitted changes; please clean it before merge")
+
+    rc, _out, err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(workspace.path)} rev-parse --verify {shlex.quote(target_branch)}",
+    )
+    if rc != 0:
+        raise RuntimeError(f"Base branch '{target_branch}' not found: {err}")
+
+    rc, _out, err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(workspace.path)} rev-parse --verify {shlex.quote(task_branch)}",
+    )
+    if rc != 0:
+        raise RuntimeError(f"Task branch '{task_branch}' not found: {err}")
+
+    rc, _out, err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(workspace.path)} checkout {shlex.quote(target_branch)}",
+    )
+    if rc != 0:
+        raise RuntimeError(f"Failed to checkout base branch '{target_branch}': {err}")
+
+    rc, _out, err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(workspace.path)} merge --no-ff --no-edit {shlex.quote(task_branch)}",
+    )
+    if rc != 0:
+        await _run_ssh_cmd(
+            ssh_target,
+            f"git -C {shlex.quote(workspace.path)} merge --abort",
+        )
+        raise RuntimeError(f"Merge failed: {err}")
 
 
 async def _remove_worktree(task_id: int, worktree_path: str, workspace: Workspace) -> None:
@@ -369,7 +502,7 @@ async def _remove_worktree(task_id: int, worktree_path: str, workspace: Workspac
     else:
         # Step 1: remove the worktree directory
         rc, err = await _run_cmd(
-            ["git", "worktree", "remove", "--force", worktree_path]
+            ["git", "-C", workspace.path, "worktree", "remove", "--force", worktree_path]
         )
         if rc != 0:
             logger.warning(

@@ -24,7 +24,7 @@ from config import settings
 from database import init_db, close_db, async_session_maker
 from runner.agent import LocalRunnerAgent
 from core.scheduler import TaskScheduler, RunnerHeartbeat
-from api import tasks, workspaces, logs, usage, terminal
+from api import tasks, workspaces, logs, usage, terminal, settings as settings_api
 from api import ai_models as models_api
 
 # Configure logging
@@ -107,6 +107,7 @@ app.include_router(logs.router)
 app.include_router(models_api.router)
 app.include_router(usage.router)
 app.include_router(terminal.router)
+app.include_router(settings_api.router)
 
 
 @app.get("/")

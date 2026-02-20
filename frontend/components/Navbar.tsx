@@ -10,6 +10,7 @@ export default function Navbar() {
     { href: '/', label: 'Task Board' },
     { href: '/tasks/new', label: 'New Task' },
     { href: '/workspaces', label: 'Workspaces' },
+    { href: '/settings', label: 'Settings' },
   ];
 
   return (

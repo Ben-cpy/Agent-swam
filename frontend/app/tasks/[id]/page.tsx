@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import LogStream from '@/components/LogStream';
 import { formatDistanceToNow } from 'date-fns';
 import { parseUTCDate } from '@/lib/utils';
+import { ArrowLeft, GitMerge } from 'lucide-react';
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError<ApiErrorBody>(error)) {
@@ -115,7 +116,7 @@ export default function TaskDetailPage() {
   };
 
   const handleMerge = async () => {
-    if (!confirm('Merge current task worktree changes back to the base branch?')) {
+    if (!confirm('Merge this task branch into base branch and mark task as DONE?')) {
       return;
     }
 
@@ -124,7 +125,7 @@ export default function TaskDetailPage() {
       await taskAPI.merge(taskId);
       mutate();
     } catch (error: unknown) {
-      alert(`Failed to trigger merge task: ${getErrorMessage(error, 'Unknown error')}`);
+      alert(`Failed to merge task: ${getErrorMessage(error, 'Unknown error')}`);
     } finally {
       setMergeLoading(false);
     }
@@ -134,6 +135,7 @@ export default function TaskDetailPage() {
     const classNames: Record<TaskStatus, string> = {
       [TaskStatus.TODO]: 'bg-slate-100 text-slate-800',
       [TaskStatus.RUNNING]: 'bg-blue-500 text-white',
+      [TaskStatus.TO_BE_REVIEW]: 'bg-amber-500 text-white',
       [TaskStatus.DONE]: 'bg-green-500 text-white',
       [TaskStatus.FAILED]: 'bg-red-500 text-white',
     };
@@ -161,6 +163,15 @@ export default function TaskDetailPage() {
       </div>
     );
   }
+
+  const canMerge = task.status === TaskStatus.TO_BE_REVIEW && !!task.worktree_path;
+  const canContinue =
+    task.status === TaskStatus.TO_BE_REVIEW ||
+    task.status === TaskStatus.DONE ||
+    task.status === TaskStatus.FAILED;
+  const goToWorkspaceBoard = () => {
+    router.push(`/workspaces/${task.workspace_id}/board`);
+  };
 
   return (
     <div className="space-y-6">
@@ -208,16 +219,23 @@ export default function TaskDetailPage() {
               Delete Task
             </Button>
           )}
-          {(task.status === TaskStatus.DONE || task.status === TaskStatus.FAILED) && !!task.worktree_path && (
+          {canMerge && (
             <Button
               onClick={handleMerge}
               disabled={mergeLoading}
+              className="bg-[#2da44e] hover:bg-[#2c974b] text-white"
             >
-              {mergeLoading ? 'Queueing Merge...' : 'Merge to Base'}
+              <GitMerge className="w-4 h-4 mr-1.5" />
+              {mergeLoading ? 'Merging...' : 'Merge'}
             </Button>
           )}
-          <Button variant="outline" onClick={() => router.push(task ? `/workspaces/${task.workspace_id}/board` : '/')}>
-            Back to Board
+          <Button
+            variant="secondary"
+            className="bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-700"
+            onClick={goToWorkspaceBoard}
+          >
+            <ArrowLeft className="w-4 h-4 mr-1.5" />
+            Back to Workspace
           </Button>
         </div>
       </div>
@@ -282,7 +300,11 @@ export default function TaskDetailPage() {
           </div>
 
           {/* Row 6: API Usage (conditional) */}
-          {task.usage_json && (task.status === TaskStatus.DONE || task.status === TaskStatus.FAILED) && (() => {
+          {task.usage_json && (
+            task.status === TaskStatus.TO_BE_REVIEW ||
+            task.status === TaskStatus.DONE ||
+            task.status === TaskStatus.FAILED
+          ) && (() => {
             try {
               const usage = JSON.parse(task.usage_json);
               const isClaudeCode = 'cost_usd' in usage || 'total_cost_usd' in usage || 'num_turns' in usage;
@@ -346,7 +368,36 @@ export default function TaskDetailPage() {
       </Card>
 
       {/* Logs */}
-      {task.run_id && <LogStream runId={task.run_id} onComplete={() => mutate()} />}
+      {task.run_id && (
+        <LogStream
+          runId={task.run_id}
+          onComplete={() => mutate()}
+          headerActions={(
+            <div className="flex items-center gap-2">
+              {canMerge && (
+                <Button
+                  size="sm"
+                  onClick={handleMerge}
+                  disabled={mergeLoading}
+                  className="bg-[#2da44e] hover:bg-[#2c974b] text-white"
+                >
+                  <GitMerge className="w-4 h-4 mr-1.5" />
+                  {mergeLoading ? 'Merging...' : 'Merge'}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="secondary"
+                className="bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-700"
+                onClick={goToWorkspaceBoard}
+              >
+                <ArrowLeft className="w-4 h-4 mr-1.5" />
+                Back to Workspace
+              </Button>
+            </div>
+          )}
+        />
+      )}
       {!task.run_id && task.status === TaskStatus.TODO && (
         <Card>
           <CardContent className="py-12 text-center">
@@ -358,7 +409,7 @@ export default function TaskDetailPage() {
       )}
 
       {/* Continue / Additional Instructions */}
-      {(task.status === TaskStatus.DONE || task.status === TaskStatus.FAILED) && (
+      {canContinue && (
         <Card>
           <CardHeader>
             <CardTitle>Continue / Additional Instructions</CardTitle>
@@ -386,6 +437,17 @@ export default function TaskDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      <div className="flex justify-end">
+        <Button
+          variant="secondary"
+          className="bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-700"
+          onClick={goToWorkspaceBoard}
+        >
+          <ArrowLeft className="w-4 h-4 mr-1.5" />
+          Back to Workspace
+        </Button>
+      </div>
     </div>
   );
 }

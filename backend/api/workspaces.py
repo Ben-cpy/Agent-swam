@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Dict, List, Optional
 from database import get_db
+from core.settings_service import get_workspace_max_parallel
 from models import Workspace, Runner, WorkspaceType, Task, TaskStatus, Run
 from schemas import WorkspaceCreate, WorkspaceResponse, WorkspaceResourcesResponse, GpuInfo, MemoryInfo
 import asyncio
@@ -85,7 +86,7 @@ async def create_workspace(
         ssh_user=workspace.ssh_user,
         container_name=workspace.container_name,
         runner_id=runner.runner_id,
-        concurrency_limit=1  # M1: fixed to 1
+        concurrency_limit=await get_workspace_max_parallel(db),
     )
 
     db.add(new_workspace)

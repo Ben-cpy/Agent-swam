@@ -1,6 +1,7 @@
 export enum TaskStatus {
   TODO = 'TODO',
   RUNNING = 'RUNNING',
+  TO_BE_REVIEW = 'TO_BE_REVIEW',
   DONE = 'DONE',
   FAILED = 'FAILED',
 }
@@ -151,4 +152,12 @@ export interface UsageStats {
     codex_cli: BackendUsage;
     [key: string]: BackendUsage;
   };
+}
+
+export interface AppSettings {
+  workspace_max_parallel: number;
+}
+
+export interface AppSettingsUpdateInput {
+  workspace_max_parallel: number;
 }

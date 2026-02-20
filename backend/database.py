@@ -88,6 +88,20 @@ async def init_db():
             # Feat3: Add tmux_session column to runs table
             if "tmux_session" not in run_columns:
                 await conn.execute(text("ALTER TABLE runs ADD COLUMN tmux_session VARCHAR(200)"))
+
+            setting_row = await conn.execute(
+                text("SELECT value FROM app_settings WHERE key = 'workspace_max_parallel' LIMIT 1")
+            )
+            setting = setting_row.fetchone()
+            if setting is None:
+                await conn.execute(
+                    text(
+                        "INSERT INTO app_settings (key, value, updated_at) "
+                        "VALUES ('workspace_max_parallel', '3', CURRENT_TIMESTAMP)"
+                    )
+                )
+                await conn.execute(text("UPDATE workspaces SET concurrency_limit = 3"))
+                await conn.execute(text("UPDATE runners SET max_parallel = 3"))
     print("Database initialized")
 
 

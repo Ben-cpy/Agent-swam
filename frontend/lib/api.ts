@@ -1,6 +1,8 @@
 import axios from 'axios';
 import {
   ApiMessage,
+  AppSettings,
+  AppSettingsUpdateInput,
   LogEntry,
   ModelsListResponse,
   NextTaskNumber,
@@ -84,4 +86,10 @@ export const logAPI = {
 export const modelsAPI = {
   list: (refresh?: boolean) =>
     apiClient.get<ModelsListResponse>('/models', { params: refresh ? { refresh: true } : {} }),
+};
+
+// Settings APIs
+export const settingsAPI = {
+  get: () => apiClient.get<AppSettings>('/settings'),
+  update: (data: AppSettingsUpdateInput) => apiClient.put<AppSettings>('/settings', data),
 };

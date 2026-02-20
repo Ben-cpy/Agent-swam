@@ -96,7 +96,12 @@ export default function WorkspaceBoardPage() {
       )}
 
       {tasks.length > 0 && (
-        <TaskBoard tasks={tasks} workspaceId={workspaceId} onTaskDeleted={mutate} />
+        <TaskBoard
+          tasks={tasks}
+          workspaceId={workspaceId}
+          workspaceConcurrencyLimit={workspace?.concurrency_limit}
+          onTaskDeleted={mutate}
+        />
       )}
     </div>
   );
