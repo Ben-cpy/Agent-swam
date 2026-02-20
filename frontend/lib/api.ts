@@ -48,6 +48,9 @@ export const taskAPI = {
   continue: (id: number, data: { prompt: string; model?: string }) =>
     apiClient.post<Task>(`/tasks/${id}/continue`, data),
 
+  merge: (id: number) =>
+    apiClient.post<Task>(`/tasks/${id}/merge`),
+
   delete: (id: number) =>
     apiClient.delete<ApiMessage>(`/tasks/${id}`),
 

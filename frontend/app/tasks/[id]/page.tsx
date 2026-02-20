@@ -32,6 +32,7 @@ export default function TaskDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [continuePrompt, setContinuePrompt] = useState('');
   const [continueLoading, setContinueLoading] = useState(false);
+  const [mergeLoading, setMergeLoading] = useState(false);
 
   // Fetch task with auto-refresh every 2 seconds
   const { data, error, isLoading, mutate } = useSWR(
@@ -113,6 +114,22 @@ export default function TaskDetailPage() {
     }
   };
 
+  const handleMerge = async () => {
+    if (!confirm('Merge current task worktree changes back to the base branch?')) {
+      return;
+    }
+
+    setMergeLoading(true);
+    try {
+      await taskAPI.merge(taskId);
+      mutate();
+    } catch (error: unknown) {
+      alert(`Failed to trigger merge task: ${getErrorMessage(error, 'Unknown error')}`);
+    } finally {
+      setMergeLoading(false);
+    }
+  };
+
   const getStatusBadge = (status: TaskStatus) => {
     const classNames: Record<TaskStatus, string> = {
       [TaskStatus.TODO]: 'bg-slate-100 text-slate-800',
@@ -189,6 +206,14 @@ export default function TaskDetailPage() {
               disabled={actionLoading}
             >
               Delete Task
+            </Button>
+          )}
+          {(task.status === TaskStatus.DONE || task.status === TaskStatus.FAILED) && !!task.worktree_path && (
+            <Button
+              onClick={handleMerge}
+              disabled={mergeLoading}
+            >
+              {mergeLoading ? 'Queueing Merge...' : 'Merge to Base'}
             </Button>
           )}
           <Button variant="outline" onClick={() => router.push(task ? `/workspaces/${task.workspace_id}/board` : '/')}>
