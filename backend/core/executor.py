@@ -234,6 +234,25 @@ class TaskExecutor:
 
             log_lines = []
             exit_code = None
+            last_flush_time = asyncio.get_event_loop().time()
+            flushed_blob_len = 0
+
+            async def _flush_logs_to_db():
+                nonlocal last_flush_time, flushed_blob_len
+                current_blob = "".join(log_lines)
+                if len(current_blob) <= flushed_blob_len:
+                    return
+                try:
+                    async with self.db_session_maker() as flush_db:
+                        run_res = await flush_db.execute(select(Run).where(Run.run_id == run_id))
+                        run_obj = run_res.scalar_one_or_none()
+                        if run_obj and not run_obj.ended_at:
+                            run_obj.log_blob = current_blob
+                            await flush_db.commit()
+                    flushed_blob_len = len(current_blob)
+                except Exception as flush_exc:
+                    logger.warning("Failed to flush logs for run %s: %s", run_id, flush_exc)
+                last_flush_time = asyncio.get_event_loop().time()
 
             async for line in adapter.execute(
                 prompt,
@@ -245,6 +264,11 @@ class TaskExecutor:
                         exit_code = int(line.split("code ")[1].split("]")[0])
                     except Exception:
                         pass
+
+                # Flush logs to DB every 2 seconds so the SSE endpoint can stream them in real time
+                now = asyncio.get_event_loop().time()
+                if now - last_flush_time >= 2.0:
+                    await _flush_logs_to_db()
 
             if exit_code is None:
                 exit_code = 1
@@ -325,6 +349,25 @@ class TaskExecutor:
 
             log_lines = []
             exit_code = None
+            last_flush_time = asyncio.get_event_loop().time()
+            flushed_blob_len = 0
+
+            async def _flush_ssh_logs_to_db():
+                nonlocal last_flush_time, flushed_blob_len
+                current_blob = "".join(log_lines)
+                if len(current_blob) <= flushed_blob_len:
+                    return
+                try:
+                    async with self.db_session_maker() as flush_db:
+                        run_res = await flush_db.execute(select(Run).where(Run.run_id == run_id))
+                        run_obj = run_res.scalar_one_or_none()
+                        if run_obj and not run_obj.ended_at:
+                            run_obj.log_blob = current_blob
+                            await flush_db.commit()
+                    flushed_blob_len = len(current_blob)
+                except Exception as flush_exc:
+                    logger.warning("Failed to flush SSH logs for run %s: %s", run_id, flush_exc)
+                last_flush_time = asyncio.get_event_loop().time()
 
             assert tail_proc.stdout is not None
             async for raw_line in tail_proc.stdout:
@@ -347,6 +390,11 @@ class TaskExecutor:
                         exit_code = 1
                     tail_proc.terminate()
                     break
+
+                # Flush logs to DB every 2 seconds so the SSE endpoint can stream them in real time
+                now = asyncio.get_event_loop().time()
+                if now - last_flush_time >= 2.0:
+                    await _flush_ssh_logs_to_db()
 
             if exit_code is None:
                 exit_code = 1

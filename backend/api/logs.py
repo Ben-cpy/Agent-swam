@@ -35,9 +35,10 @@ async def stream_logs(
         last_sent_length = 0
 
         while True:
-            # Fetch latest run data
+            # Use populate_existing=True to bypass SQLAlchemy's identity map cache
+            # and always fetch the latest data written by the background executor task
             result = await db.execute(
-                select(Run).where(Run.run_id == run_id)
+                select(Run).where(Run.run_id == run_id).execution_options(populate_existing=True)
             )
             current_run = result.scalar_one_or_none()
 
@@ -77,7 +78,7 @@ async def stream_logs(
 
             # Check if task is still running
             result = await db.execute(
-                select(Task).where(Task.run_id == run_id)
+                select(Task).where(Task.run_id == run_id).execution_options(populate_existing=True)
             )
             task = result.scalar_one_or_none()
 
