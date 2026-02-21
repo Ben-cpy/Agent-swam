@@ -8,8 +8,8 @@ import { ApiErrorBody, BackendType, Workspace } from '@/lib/types';
 import { MAX_PROMPT_CHARS } from '@/lib/limits';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { MentionTextarea } from '@/components/MentionTextarea';
 import {
   Select,
   SelectContent,
@@ -256,13 +256,12 @@ export default function TaskForm({ defaultWorkspaceId, lockedWorkspaceId }: Task
             <Label htmlFor="prompt">
               Prompt <span className="text-red-500">*</span>
             </Label>
-            <Textarea
+            <MentionTextarea
               id="prompt"
               value={formData.prompt}
-              onChange={(e) =>
-                setFormData({ ...formData, prompt: e.target.value })
-              }
-              placeholder="Describe the task in detail..."
+              onChange={(v) => setFormData({ ...formData, prompt: v })}
+              workspaceId={formData.workspace_id ? parseInt(formData.workspace_id) : undefined}
+              placeholder="Describe the task in detail… (type @ to reference a file)"
               rows={6}
               maxLength={MAX_PROMPT_CHARS}
               className={errors.prompt ? 'border-red-500' : ''}
