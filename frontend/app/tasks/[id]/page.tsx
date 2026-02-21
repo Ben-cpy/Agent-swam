@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import axios from 'axios';
@@ -35,6 +35,19 @@ export default function TaskDetailPage() {
   const [continuePrompt, setContinuePrompt] = useState('');
   const [continueLoading, setContinueLoading] = useState(false);
   const [mergeLoading, setMergeLoading] = useState(false);
+  const [retryNotice, setRetryNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!retryNotice) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setRetryNotice(null);
+    }, 3000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [retryNotice]);
 
   // Fetch task with auto-refresh every 2 seconds
   const { data, error, isLoading, mutate } = useSWR(
@@ -79,6 +92,7 @@ export default function TaskDetailPage() {
     setActionLoading(true);
     try {
       await taskAPI.retry(taskId);
+      setRetryNotice('Task re-queued. Execution will start shortly.');
       mutate();
     } catch (error: unknown) {
       alert(`Failed to retry task: ${getErrorMessage(error, 'Unknown error')}`);
@@ -216,8 +230,12 @@ export default function TaskDetailPage() {
             </Button>
           )}
           {task.status === TaskStatus.FAILED && (
-            <Button onClick={handleRetry} disabled={actionLoading}>
-              Retry Task
+            <Button
+              onClick={handleRetry}
+              disabled={actionLoading}
+              className="bg-[#0969da] hover:bg-[#0860ca] text-white"
+            >
+              {actionLoading ? 'Retrying...' : 'Retry Task'}
             </Button>
           )}
           {task.status !== TaskStatus.RUNNING && (
@@ -249,6 +267,15 @@ export default function TaskDetailPage() {
           </Button>
         </div>
       </div>
+
+      {retryNotice && (
+        <div
+          role="status"
+          className="rounded-md border border-[#1f6feb]/30 bg-[#ddf4ff] px-3 py-2 text-sm text-[#0969da]"
+        >
+          {retryNotice}
+        </div>
+      )}
 
       {/* Task Details */}
       <Card>
