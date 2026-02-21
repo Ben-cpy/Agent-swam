@@ -1,4 +1,19 @@
-﻿* **失败任务重试反馈与按钮样式优化（7059f9a，2026-02-21）**：
+﻿* **Settings 通知开关（9411478，2026-02-21）**：
+  - 问题：`TO_BE_REVIEW` 全局弹窗默认始终开启，缺少用户侧开关，无法按偏好关闭通知。
+  - 解决：新增 `frontend/lib/reviewNotificationSettings.ts` 管理本地持久化开关；`frontend/app/settings/page.tsx` 增加通知开关；`frontend/components/ToBeReviewNotifier.tsx` 接入开关监听，关闭时停止轮询与弹窗，开启后即时生效。
+  - 避免复发：对全局提醒类能力默认提供显式开关，并让通知触发组件直接订阅该配置，避免“设置页改了但运行态不生效”。
+  - Commit: `9411478`
+* **Review 通知漏报边界修复（1cea57b，2026-02-21）**：
+  - 问题：如果任务在两次轮询之间快速完成，下一次拉取时可能“首次出现即 TO_BE_REVIEW”，原逻辑会因为缺少上一状态而不弹窗。
+  - 解决：在 `frontend/components/ToBeReviewNotifier.tsx` 调整跃迁判断：首次观察到任务且当前为 `TO_BE_REVIEW` 也触发通知。
+  - 避免复发：状态变化提醒逻辑需覆盖“首次观测态”场景，避免仅依赖严格的前后态对比。
+  - Commit: `1cea57b`
+* **TO_BE_REVIEW 全局弹窗通知（56a0913，2026-02-21）**：
+  - 问题：任务进入 `TO_BE_REVIEW` 后，只有在看板/详情页内才能看到状态变化，切到其他站内页面时容易错过待审核任务。
+  - 解决：新增 `frontend/components/ToBeReviewNotifier.tsx` 全局客户端通知器并挂载到 `frontend/app/layout.tsx`；通过 SWR 轮询任务列表，检测任务状态由非 `TO_BE_REVIEW` 跃迁到 `TO_BE_REVIEW` 时触发浏览器 Notification 弹窗（`silent: true`，点击跳转任务详情）。
+  - 避免复发：对关键状态流转（如待审核、失败、人工介入）统一提供跨页面可见提醒，避免仅依赖当前页面局部 UI 提示。
+  - Commit: `56a0913`
+* **失败任务重试反馈与按钮样式优化（7059f9a，2026-02-21）**：
   - 问题：任务详情页中 FAILED 任务点击 `Retry Task` 后会触发重试，但界面没有成功反馈，且按钮默认黑色视觉不匹配当前页面风格。
   - 解决：在 `frontend/app/tasks/[id]/page.tsx` 新增 3 秒自动消失的重试成功提示条（`Task re-queued. Execution will start shortly.`），并将 `Retry Task` 按钮改为 GitHub 风格蓝色（`#0969da`，hover `#0860ca`），同时补充 `Retrying...` 加载文案。
   - 避免复发：对"状态变更触发后台动作"的按钮统一增加即时 UI 反馈（toast/提示条/状态文案），避免用户误判点击无效。
