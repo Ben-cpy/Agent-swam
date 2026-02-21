@@ -63,3 +63,9 @@
   - 解决：增强 `backend/core/adapters/cli_resolver.py`：扩展 Git Bash 探测路径（Program Files/LocalAppData/PATH/环境变量）、去重校验并统一优先级；`claude/codex/copilot` 适配器统一注入 `COMSPEC/SHELL` 覆盖，`Claude` 额外注入 `CLAUDE_CODE_SHELL`；`Codex` 额外传入 `shell_environment_policy.set.*` 作为 shell tool 环境提示。
   - 避免复发：Windows shell 选择统一走 `cli_resolver` 单一入口，新增 CLI/适配器时禁止各自硬编码 shell 逻辑；任何变更都先验证当前机型解析顺序输出。
   - Commit: `46b4fa0`
+
+* **CI/CD 基线与交付产物流水线（cb78637，2026-02-21）**：
+  - 问题：仓库缺少 GitHub 端自动质量闸门，新改动可能在合并后才暴露后端回归或前端构建问题；同时无主分支自动交付产物。
+  - 解决：新增 `.github/workflows/ci-cd.yml`，CI 覆盖后端（ubuntu/windows + Python 3.9、依赖检查、编译、回归脚本）和前端（Node 20、lint、build）；CD 在 `main` push 且 CI 通过后自动打包并上传 delivery artifact。补充 `CI_CD.md` 说明触发条件、检查项和分支保护建议。
+  - 避免复发：后续新增功能必须先补对应测试/构建命令并纳入 workflow；合并策略统一依赖必过检查，禁止绕过 CI 直接入主分支。
+  - Commit: `cb78637`
