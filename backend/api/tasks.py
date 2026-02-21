@@ -325,6 +325,37 @@ async def merge_task(
     return task
 
 
+@router.post("/{task_id}/mark-done", response_model=TaskResponse)
+async def mark_task_done(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Mark a reviewed task as DONE manually.
+    This endpoint never performs merge/cleanup automatically.
+    """
+    result = await db.execute(
+        select(Task).where(Task.id == task_id)
+    )
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status != TaskStatus.TO_BE_REVIEW:
+        raise HTTPException(
+            status_code=400,
+            detail="Only TO_BE_REVIEW tasks can be marked as DONE",
+        )
+
+    task.status = TaskStatus.DONE
+    task.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(task)
+    logger.info("Task %s marked as DONE manually", task_id)
+    return task
+
+
 @router.delete("/{task_id}")
 async def delete_task(
     task_id: int,

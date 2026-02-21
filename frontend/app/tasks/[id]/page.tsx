@@ -36,6 +36,7 @@ export default function TaskDetailPage() {
   const [continuePrompt, setContinuePrompt] = useState('');
   const [continueLoading, setContinueLoading] = useState(false);
   const [mergeLoading, setMergeLoading] = useState(false);
+  const [markDoneLoading, setMarkDoneLoading] = useState(false);
   const [retryNotice, setRetryNotice] = useState<string | null>(null);
   const [titleEditing, setTitleEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -154,6 +155,22 @@ export default function TaskDetailPage() {
     }
   };
 
+  const handleMarkDone = async () => {
+    if (!confirm('Mark this task as done without auto merge?')) {
+      return;
+    }
+
+    setMarkDoneLoading(true);
+    try {
+      await taskAPI.markDone(taskId);
+      mutate();
+    } catch (error: unknown) {
+      alert(`Failed to mark task as done: ${getErrorMessage(error, 'Unknown error')}`);
+    } finally {
+      setMarkDoneLoading(false);
+    }
+  };
+
   const handleSaveTitle = async () => {
     const trimmed = titleDraft.trim();
     if (!trimmed || trimmed === task?.title) {
@@ -211,6 +228,7 @@ export default function TaskDetailPage() {
   }
 
   const canMerge = task.status === TaskStatus.TO_BE_REVIEW && !!task.worktree_path;
+  const canMarkDone = task.status === TaskStatus.TO_BE_REVIEW;
   const canContinue =
     task.status === TaskStatus.TO_BE_REVIEW ||
     task.status === TaskStatus.DONE ||
@@ -314,11 +332,21 @@ export default function TaskDetailPage() {
           {canMerge && (
             <Button
               onClick={handleMerge}
-              disabled={mergeLoading}
+              disabled={mergeLoading || markDoneLoading}
               className="bg-[#2da44e] hover:bg-[#2c974b] text-white"
             >
               <GitMerge className="w-4 h-4 mr-1.5" />
               {mergeLoading ? 'Merging...' : 'Merge'}
+            </Button>
+          )}
+          {canMarkDone && (
+            <Button
+              onClick={handleMarkDone}
+              disabled={markDoneLoading || mergeLoading}
+              variant="outline"
+            >
+              <Check className="w-4 h-4 mr-1.5" />
+              {markDoneLoading ? 'Marking...' : 'Mark as Done'}
             </Button>
           )}
           <Button
@@ -497,11 +525,22 @@ export default function TaskDetailPage() {
                 <Button
                   size="sm"
                   onClick={handleMerge}
-                  disabled={mergeLoading}
+                  disabled={mergeLoading || markDoneLoading}
                   className="bg-[#2da44e] hover:bg-[#2c974b] text-white"
                 >
                   <GitMerge className="w-4 h-4 mr-1.5" />
                   {mergeLoading ? 'Merging...' : 'Merge'}
+                </Button>
+              )}
+              {canMarkDone && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleMarkDone}
+                  disabled={markDoneLoading || mergeLoading}
+                >
+                  <Check className="w-4 h-4 mr-1.5" />
+                  {markDoneLoading ? 'Marking...' : 'Mark as Done'}
                 </Button>
               )}
               <Button

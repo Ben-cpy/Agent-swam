@@ -1,5 +1,5 @@
 """
-Regression test: reconcile dangling task/worktree states.
+Regression test: reconcile dangling task/worktree references.
 
 Run with:
   python tests/test_task_reconciler_orphans.py
@@ -150,7 +150,7 @@ async def _run() -> None:
 
             review_row = await db.execute(select(Task).where(Task.id == review_task_id))
             review_after = review_row.scalar_one()
-            assert review_after.status == TaskStatus.DONE
+            assert review_after.status == TaskStatus.TO_BE_REVIEW
             assert review_after.worktree_path is None
 
             todo_row = await db.execute(select(Task).where(Task.id == todo_task_id))
@@ -163,9 +163,9 @@ async def _run() -> None:
             cwd=repo_path,
             check=False,
         )
-        assert branch_check.returncode != 0, "expected reconciler to delete merged task branch"
+        assert branch_check.returncode == 0, "expected reconciler to keep task branch for manual review"
 
-        print("PASS: dangling tasks are reconciled (merged review task auto-closed, invalid paths cleaned)")
+        print("PASS: dangling task worktree references are reconciled without auto-closing review tasks")
 
 
 if __name__ == "__main__":

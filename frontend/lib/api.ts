@@ -53,6 +53,9 @@ export const taskAPI = {
   merge: (id: number) =>
     apiClient.post<Task>(`/tasks/${id}/merge`),
 
+  markDone: (id: number) =>
+    apiClient.post<Task>(`/tasks/${id}/mark-done`),
+
   delete: (id: number) =>
     apiClient.delete<ApiMessage>(`/tasks/${id}`),
 
