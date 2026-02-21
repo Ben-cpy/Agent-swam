@@ -22,6 +22,7 @@ class CodexAdapter(BackendAdapter):
         Build Codex CLI command.
 
         Format: codex exec --json --sandbox danger-full-access --cd <workspace>
+                --ask-for-approval never
                 [--model <model>] [--reasoning-effort <effort>] -
 
         Prompt content is provided via stdin to avoid command-line length limits.
@@ -30,6 +31,7 @@ class CodexAdapter(BackendAdapter):
             resolve_cli("codex"),
             "exec",
             "--json",  # Output JSONL events
+            "--ask-for-approval", "never",  # Non-interactive backend flow must not wait for approvals
             "--sandbox", "danger-full-access",  # Allow full filesystem access
             "--cd", self.workspace_path,  # Set working directory
             "--skip-git-repo-check",  # Allow running outside git repo
