@@ -63,3 +63,9 @@
   - 解决：增强 `backend/core/adapters/cli_resolver.py`：扩展 Git Bash 探测路径（Program Files/LocalAppData/PATH/环境变量）、去重校验并统一优先级；`claude/codex/copilot` 适配器统一注入 `COMSPEC/SHELL` 覆盖，`Claude` 额外注入 `CLAUDE_CODE_SHELL`；`Codex` 额外传入 `shell_environment_policy.set.*` 作为 shell tool 环境提示。
   - 避免复发：Windows shell 选择统一走 `cli_resolver` 单一入口，新增 CLI/适配器时禁止各自硬编码 shell 逻辑；任何变更都先验证当前机型解析顺序输出。
   - Commit: `46b4fa0`
+
+* **空悬 Task 自动修复与 Worktree 健壮性增强（05420fd，2026-02-21）**：
+  - 问题：用户在文件管理器/CMD 手工删除 worktree 或外部完成分支合并后，DB 仍保留旧 `worktree_path` 与 `TO_BE_REVIEW` 任务，前端会出现空悬 task；同时执行器会把存在但非 git worktree 的目录误判为可复用。
+  - 解决：新增 `backend/core/task_reconciler.py` 并接入 scheduler 每轮巡检，自动清理失效 worktree 引用、执行 `git worktree prune`、并将已外部合并/分支缺失的 `TO_BE_REVIEW` 任务自动闭环为 `DONE`；同时强化 `executor._create_worktree`，仅复用有效 git worktree，空目录自动清理，异常路径自动回退到恢复路径；`merge` 接口改为在 worktree 缺失时仍可按分支完成合并，并在清理阶段补 `worktree prune`。
+  - 避免复发：所有路径存在即复用的逻辑必须先做 git worktree 有效性校验；状态机需定期与 Git 真实状态对账，避免仅依赖 DB 字段导致长期空悬。
+  - Commit: `05420fd`
