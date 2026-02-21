@@ -60,6 +60,7 @@ class Task(Base):
     worktree_path = Column(String(1000), nullable=True)
     model = Column(String(200), nullable=True)
     permission_mode = Column(String(50), nullable=True)  # None = bypassPermissions (current default)
+    prompt_history = Column(JSON, nullable=True)  # List[str] – one entry per turn
 
     # Relationships
     workspace = relationship("Workspace", back_populates="tasks")

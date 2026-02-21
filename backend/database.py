@@ -115,6 +115,8 @@ async def init_db():
                 await conn.execute(text("ALTER TABLE tasks ADD COLUMN model VARCHAR(200)"))
             if "permission_mode" not in task_columns:
                 await conn.execute(text("ALTER TABLE tasks ADD COLUMN permission_mode VARCHAR(50)"))
+            if "prompt_history" not in task_columns:
+                await conn.execute(text("ALTER TABLE tasks ADD COLUMN prompt_history JSON"))
 
             result = await conn.execute(text("PRAGMA table_info(workspaces)"))
             existing_columns = {row[1] for row in result.fetchall()}

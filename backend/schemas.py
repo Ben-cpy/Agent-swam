@@ -34,6 +34,7 @@ class TaskResponse(TaskBase):
     worktree_path: Optional[str] = None
     run_started_at: Optional[datetime] = None
     usage_json: Optional[str] = None
+    prompt_history: Optional[List[str]] = None
 
     @classmethod
     def from_orm(cls, obj):
