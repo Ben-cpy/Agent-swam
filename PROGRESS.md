@@ -58,3 +58,8 @@
   - 避免复发：并行分支都维护同一沉淀文档时，合并前先 rebase 或提前拆分独立条目，降低冲突概率。
   - Commit: `0747361`
 
+* **Windows 终端优先级鲁棒性增强（46b4fa0，2026-02-21）**：
+  - 问题：用户反馈在 Windows 下 `codex`、`copilot` 运行时偏向 PowerShell，希望默认优先 `git bash > cmd > powershell`，并在不同安装路径下保持稳定回退。
+  - 解决：增强 `backend/core/adapters/cli_resolver.py`：扩展 Git Bash 探测路径（Program Files/LocalAppData/PATH/环境变量）、去重校验并统一优先级；`claude/codex/copilot` 适配器统一注入 `COMSPEC/SHELL` 覆盖，`Claude` 额外注入 `CLAUDE_CODE_SHELL`；`Codex` 额外传入 `shell_environment_policy.set.*` 作为 shell tool 环境提示。
+  - 避免复发：Windows shell 选择统一走 `cli_resolver` 单一入口，新增 CLI/适配器时禁止各自硬编码 shell 逻辑；任何变更都先验证当前机型解析顺序输出。
+  - Commit: `46b4fa0`
