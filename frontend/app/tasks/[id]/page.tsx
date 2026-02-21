@@ -135,7 +135,7 @@ export default function TaskDetailPage() {
   };
 
   const handleMerge = async () => {
-    if (!confirm('Merge this task branch into base branch and mark task as DONE?')) {
+    if (!confirm('Merge task branch now? System will auto-commit pending task changes first, then try rule-based merge, and only use AI conflict resolution if needed.')) {
       return;
     }
 

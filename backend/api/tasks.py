@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import shlex
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,8 +9,9 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from database import get_db, async_session_maker
-from models import Task, TaskStatus, Workspace, WorkspaceType, Run
+from models import Task, TaskStatus, Workspace, WorkspaceType, Run, BackendType
 from schemas import TaskCreate, TaskResponse, NextTaskNumberResponse, TaskContinueRequest
+from core.adapters import ClaudeCodeAdapter, CodexAdapter, CopilotAdapter
 from core.executor import TaskExecutor
 from datetime import datetime, timezone
 
@@ -263,9 +265,21 @@ async def merge_task(
 
     try:
         if workspace.workspace_type in (WorkspaceType.SSH, WorkspaceType.SSH_CONTAINER):
-            await _merge_on_ssh_workspace(workspace, task.worktree_path, target_branch, task_branch)
+            await _merge_on_ssh_workspace(
+                workspace=workspace,
+                task=task,
+                worktree_path=task.worktree_path,
+                target_branch=target_branch,
+                preferred_task_branch=task_branch,
+            )
         else:
-            await _merge_on_local_workspace(workspace, task.worktree_path, target_branch, task_branch)
+            await _merge_on_local_workspace(
+                workspace=workspace,
+                task=task,
+                worktree_path=task.worktree_path,
+                target_branch=target_branch,
+                preferred_task_branch=task_branch,
+            )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -364,49 +378,330 @@ async def _run_ssh_cmd(ssh_target: str, cmd: str) -> tuple[int, str, str]:
     )
 
 
-async def _merge_on_local_workspace(
-    workspace: Workspace,
-    worktree_path: str,
-    target_branch: str,
-    task_branch: str,
-) -> None:
-    rc, out, err = await _run_cmd_capture(["git", "-C", worktree_path, "status", "--porcelain"])
-    if rc != 0:
-        raise RuntimeError(f"Failed to inspect task worktree status: {err}")
-    if out:
-        raise RuntimeError("Task worktree has uncommitted changes; please continue task and commit first")
+def _combine_git_output(stdout: str, stderr: str) -> str:
+    parts = [p.strip() for p in (stdout, stderr) if p and p.strip()]
+    return " | ".join(parts)
 
-    rc, out, err = await _run_cmd_capture(["git", "-C", workspace.path, "status", "--porcelain"])
+
+def _extract_exit_code_from_adapter_logs(lines: list[str]) -> int:
+    for line in reversed(lines):
+        match = re.search(r"\[Process exited with code (-?\d+)\]", line)
+        if match:
+            return int(match.group(1))
+    return 1
+
+
+async def _has_unmerged_files_local(repo_path: str) -> bool:
+    rc, out, err = await _run_cmd_capture(
+        ["git", "-C", repo_path, "diff", "--name-only", "--diff-filter=U"]
+    )
+    if rc != 0:
+        raise RuntimeError(f"Failed to inspect merge conflicts: {err}")
+    return bool(out.strip())
+
+
+async def _has_unmerged_files_ssh(ssh_target: str, repo_path: str) -> bool:
+    rc, out, err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(repo_path)} diff --name-only --diff-filter=U",
+    )
+    if rc != 0:
+        raise RuntimeError(f"Failed to inspect merge conflicts (ssh): {err}")
+    return bool(out.strip())
+
+
+async def _is_merge_in_progress_local(repo_path: str) -> bool:
+    rc, _out, _err = await _run_cmd_capture(
+        ["git", "-C", repo_path, "rev-parse", "-q", "--verify", "MERGE_HEAD"]
+    )
+    return rc == 0
+
+
+async def _ensure_clean_base_workspace_local(workspace_path: str) -> None:
+    rc, out, err = await _run_cmd_capture(["git", "-C", workspace_path, "status", "--porcelain"])
     if rc != 0:
         raise RuntimeError(f"Failed to inspect base workspace status: {err}")
     if out:
         raise RuntimeError("Base workspace has uncommitted changes; please clean it before merge")
 
+
+async def _ensure_clean_base_workspace_ssh(ssh_target: str, workspace_path: str) -> None:
+    rc, out, err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(workspace_path)} status --porcelain",
+    )
+    if rc != 0:
+        raise RuntimeError(f"Failed to inspect base workspace status (ssh): {err}")
+    if out:
+        raise RuntimeError("Base workspace has uncommitted changes; please clean it before merge")
+
+
+async def _resolve_task_branch_local(
+    workspace_path: str,
+    worktree_path: str,
+    preferred_task_branch: str,
+) -> str:
+    rc, _out, _err = await _run_cmd_capture(
+        ["git", "-C", workspace_path, "rev-parse", "--verify", preferred_task_branch]
+    )
+    if rc == 0:
+        return preferred_task_branch
+
+    rc, out, err = await _run_cmd_capture(
+        ["git", "-C", worktree_path, "rev-parse", "--abbrev-ref", "HEAD"]
+    )
+    if rc != 0:
+        raise RuntimeError(f"Task branch '{preferred_task_branch}' not found: {err}")
+    detected_branch = out.strip()
+    if not detected_branch or detected_branch == "HEAD":
+        raise RuntimeError(f"Task branch '{preferred_task_branch}' not found and worktree is detached")
+
+    rc, _out, err = await _run_cmd_capture(
+        ["git", "-C", workspace_path, "rev-parse", "--verify", detected_branch]
+    )
+    if rc != 0:
+        raise RuntimeError(
+            f"Task branch '{preferred_task_branch}' not found and detected branch '{detected_branch}' is invalid: {err}"
+        )
+    logger.warning(
+        "Preferred task branch '%s' missing, fallback to detected branch '%s'",
+        preferred_task_branch,
+        detected_branch,
+    )
+    return detected_branch
+
+
+async def _resolve_task_branch_ssh(
+    ssh_target: str,
+    workspace_path: str,
+    worktree_path: str,
+    preferred_task_branch: str,
+) -> str:
+    rc, _out, _err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(workspace_path)} rev-parse --verify {shlex.quote(preferred_task_branch)}",
+    )
+    if rc == 0:
+        return preferred_task_branch
+
+    rc, out, err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(worktree_path)} rev-parse --abbrev-ref HEAD",
+    )
+    if rc != 0:
+        raise RuntimeError(f"Task branch '{preferred_task_branch}' not found: {err}")
+    detected_branch = out.strip()
+    if not detected_branch or detected_branch == "HEAD":
+        raise RuntimeError(f"Task branch '{preferred_task_branch}' not found and worktree is detached")
+
+    rc, _out, err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(workspace_path)} rev-parse --verify {shlex.quote(detected_branch)}",
+    )
+    if rc != 0:
+        raise RuntimeError(
+            f"Task branch '{preferred_task_branch}' not found and detected branch '{detected_branch}' is invalid: {err}"
+        )
+    logger.warning(
+        "Preferred task branch '%s' missing on ssh workspace, fallback to detected branch '%s'",
+        preferred_task_branch,
+        detected_branch,
+    )
+    return detected_branch
+
+
+async def _auto_commit_worktree_changes_local(worktree_path: str, task_id: int) -> bool:
+    rc, out, err = await _run_cmd_capture(["git", "-C", worktree_path, "status", "--porcelain"])
+    if rc != 0:
+        raise RuntimeError(f"Failed to inspect task worktree status: {err}")
+    if not out:
+        return False
+
+    rc, _out, err = await _run_cmd_capture(["git", "-C", worktree_path, "add", "-A"])
+    if rc != 0:
+        raise RuntimeError(f"Failed to stage task worktree changes before merge: {err}")
+
+    commit_msg = f"chore(task-{task_id}): auto-commit pending changes before merge"
+    rc, _out, err = await _run_cmd_capture(["git", "-C", worktree_path, "commit", "-m", commit_msg])
+    if rc != 0:
+        rc2, out2, err2 = await _run_cmd_capture(["git", "-C", worktree_path, "status", "--porcelain"])
+        if rc2 != 0:
+            raise RuntimeError(f"Failed to verify auto-commit result: {err2}")
+        if out2:
+            raise RuntimeError(f"Failed to auto-commit task worktree changes: {err}")
+        return False
+
+    logger.info("Task %s: auto-committed pending worktree changes before merge", task_id)
+    return True
+
+
+async def _auto_commit_worktree_changes_ssh(
+    ssh_target: str,
+    worktree_path: str,
+    task_id: int,
+) -> bool:
+    rc, out, err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(worktree_path)} status --porcelain",
+    )
+    if rc != 0:
+        raise RuntimeError(f"Failed to inspect task worktree status (ssh): {err}")
+    if not out:
+        return False
+
+    rc, _out, err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(worktree_path)} add -A",
+    )
+    if rc != 0:
+        raise RuntimeError(f"Failed to stage task worktree changes before merge (ssh): {err}")
+
+    commit_msg = shlex.quote(f"chore(task-{task_id}): auto-commit pending changes before merge")
+    rc, _out, err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(worktree_path)} commit -m {commit_msg}",
+    )
+    if rc != 0:
+        rc2, out2, err2 = await _run_ssh_cmd(
+            ssh_target,
+            f"git -C {shlex.quote(worktree_path)} status --porcelain",
+        )
+        if rc2 != 0:
+            raise RuntimeError(f"Failed to verify auto-commit result (ssh): {err2}")
+        if out2:
+            raise RuntimeError(f"Failed to auto-commit task worktree changes (ssh): {err}")
+        return False
+
+    logger.info("Task %s: auto-committed pending worktree changes before merge (ssh)", task_id)
+    return True
+
+
+def _build_merge_adapter(task: Task, workspace_path: str):
+    backend_value = (
+        task.backend.value if isinstance(task.backend, BackendType) else str(task.backend)
+    )
+    if backend_value == BackendType.CLAUDE_CODE.value:
+        return ClaudeCodeAdapter(
+            workspace_path=workspace_path,
+            model=task.model,
+            permission_mode=task.permission_mode,
+        )
+    if backend_value == BackendType.CODEX_CLI.value:
+        return CodexAdapter(workspace_path=workspace_path, model=task.model)
+    if backend_value == BackendType.COPILOT_CLI.value:
+        return CopilotAdapter(workspace_path=workspace_path, model=task.model)
+    raise RuntimeError(f"Unsupported backend for AI merge fallback: {backend_value}")
+
+
+async def _resolve_merge_conflicts_with_ai_local(
+    task: Task,
+    workspace: Workspace,
+    target_branch: str,
+    task_branch: str,
+    merge_error: str,
+) -> None:
+    adapter = _build_merge_adapter(task=task, workspace_path=workspace.path)
+    prompt = (
+        "You are resolving a git merge conflict in an existing repository.\n"
+        f"Repository path: {workspace.path}\n"
+        f"Current branch: {target_branch}\n"
+        f"Merging branch: {task_branch}\n"
+        f"Task id: {task.id}\n"
+        f"Task title: {task.title}\n"
+        f"Task prompt: {task.prompt}\n\n"
+        "Current state:\n"
+        "- A merge is already in progress and has conflicts.\n"
+        "- Do NOT run git reset/rebase/checkout to discard changes.\n"
+        "- Resolve conflicts with the best integrated code.\n"
+        "- Stage resolved files.\n"
+        "- Complete merge commit (git commit --no-edit is acceptable).\n"
+        "- After finishing, ensure there are no unmerged files.\n\n"
+        f"Original merge error: {merge_error}\n"
+    )
+
+    logs: list[str] = []
+    async for line in adapter.execute(prompt):
+        logs.append(line.rstrip())
+    exit_code = _extract_exit_code_from_adapter_logs(logs)
+    if exit_code != 0:
+        raise RuntimeError(f"AI conflict resolution failed with exit code {exit_code}")
+
+    if await _has_unmerged_files_local(workspace.path):
+        raise RuntimeError("AI conflict resolution finished but unresolved files still exist")
+
+    if await _is_merge_in_progress_local(workspace.path):
+        rc, out, err = await _run_cmd_capture(["git", "-C", workspace.path, "commit", "--no-edit"])
+        if rc != 0:
+            raise RuntimeError(
+                f"AI resolved conflicts but failed to finalize merge commit: {_combine_git_output(out, err)}"
+            )
+
+
+async def _merge_on_local_workspace(
+    workspace: Workspace,
+    task: Task,
+    worktree_path: str,
+    target_branch: str,
+    preferred_task_branch: str,
+) -> None:
+    await _auto_commit_worktree_changes_local(worktree_path=worktree_path, task_id=task.id)
+    await _ensure_clean_base_workspace_local(workspace.path)
+
     rc, _out, err = await _run_cmd_capture(["git", "-C", workspace.path, "rev-parse", "--verify", target_branch])
     if rc != 0:
         raise RuntimeError(f"Base branch '{target_branch}' not found: {err}")
 
-    rc, _out, err = await _run_cmd_capture(["git", "-C", workspace.path, "rev-parse", "--verify", task_branch])
-    if rc != 0:
-        raise RuntimeError(f"Task branch '{task_branch}' not found: {err}")
+    task_branch = await _resolve_task_branch_local(
+        workspace_path=workspace.path,
+        worktree_path=worktree_path,
+        preferred_task_branch=preferred_task_branch,
+    )
 
     rc, _out, err = await _run_cmd_capture(["git", "-C", workspace.path, "checkout", target_branch])
     if rc != 0:
         raise RuntimeError(f"Failed to checkout base branch '{target_branch}': {err}")
 
-    rc, _out, err = await _run_cmd_capture(
+    rc, out, err = await _run_cmd_capture(
+        ["git", "-C", workspace.path, "merge", "--ff-only", task_branch]
+    )
+    if rc == 0:
+        return
+
+    rc, out, err = await _run_cmd_capture(
         ["git", "-C", workspace.path, "merge", "--no-ff", "--no-edit", task_branch]
     )
-    if rc != 0:
-        await _run_cmd_capture(["git", "-C", workspace.path, "merge", "--abort"])
-        raise RuntimeError(f"Merge failed: {err}")
+    if rc == 0:
+        return
+
+    if await _has_unmerged_files_local(workspace.path):
+        logger.warning(
+            "Merge conflict detected for task %s, invoking backend '%s' for AI-assisted resolution",
+            task.id,
+            task.backend,
+        )
+        try:
+            await _resolve_merge_conflicts_with_ai_local(
+                task=task,
+                workspace=workspace,
+                target_branch=target_branch,
+                task_branch=task_branch,
+                merge_error=_combine_git_output(out, err),
+            )
+            return
+        except RuntimeError as ai_exc:
+            await _run_cmd_capture(["git", "-C", workspace.path, "merge", "--abort"])
+            raise RuntimeError(str(ai_exc)) from ai_exc
+
+    await _run_cmd_capture(["git", "-C", workspace.path, "merge", "--abort"])
+    raise RuntimeError(f"Merge failed: {_combine_git_output(out, err)}")
 
 
 async def _merge_on_ssh_workspace(
     workspace: Workspace,
+    task: Task,
     worktree_path: str,
     target_branch: str,
-    task_branch: str,
+    preferred_task_branch: str,
 ) -> None:
     if not workspace.host:
         raise RuntimeError("SSH workspace host is missing")
@@ -415,23 +710,12 @@ async def _merge_on_ssh_workspace(
         f"{workspace.ssh_user}@{workspace.host}" if workspace.ssh_user else workspace.host
     )
 
-    rc, out, err = await _run_ssh_cmd(
-        ssh_target,
-        f"git -C {shlex.quote(worktree_path)} status --porcelain",
+    await _auto_commit_worktree_changes_ssh(
+        ssh_target=ssh_target,
+        worktree_path=worktree_path,
+        task_id=task.id,
     )
-    if rc != 0:
-        raise RuntimeError(f"Failed to inspect task worktree status (ssh): {err}")
-    if out:
-        raise RuntimeError("Task worktree has uncommitted changes; please continue task and commit first")
-
-    rc, out, err = await _run_ssh_cmd(
-        ssh_target,
-        f"git -C {shlex.quote(workspace.path)} status --porcelain",
-    )
-    if rc != 0:
-        raise RuntimeError(f"Failed to inspect base workspace status (ssh): {err}")
-    if out:
-        raise RuntimeError("Base workspace has uncommitted changes; please clean it before merge")
+    await _ensure_clean_base_workspace_ssh(ssh_target=ssh_target, workspace_path=workspace.path)
 
     rc, _out, err = await _run_ssh_cmd(
         ssh_target,
@@ -440,12 +724,12 @@ async def _merge_on_ssh_workspace(
     if rc != 0:
         raise RuntimeError(f"Base branch '{target_branch}' not found: {err}")
 
-    rc, _out, err = await _run_ssh_cmd(
-        ssh_target,
-        f"git -C {shlex.quote(workspace.path)} rev-parse --verify {shlex.quote(task_branch)}",
+    task_branch = await _resolve_task_branch_ssh(
+        ssh_target=ssh_target,
+        workspace_path=workspace.path,
+        worktree_path=worktree_path,
+        preferred_task_branch=preferred_task_branch,
     )
-    if rc != 0:
-        raise RuntimeError(f"Task branch '{task_branch}' not found: {err}")
 
     rc, _out, err = await _run_ssh_cmd(
         ssh_target,
@@ -454,16 +738,35 @@ async def _merge_on_ssh_workspace(
     if rc != 0:
         raise RuntimeError(f"Failed to checkout base branch '{target_branch}': {err}")
 
+    rc, _out, _err = await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(workspace.path)} merge --ff-only {shlex.quote(task_branch)}",
+    )
+    if rc == 0:
+        return
+
     rc, _out, err = await _run_ssh_cmd(
         ssh_target,
         f"git -C {shlex.quote(workspace.path)} merge --no-ff --no-edit {shlex.quote(task_branch)}",
     )
-    if rc != 0:
+    if rc == 0:
+        return
+
+    if await _has_unmerged_files_ssh(ssh_target=ssh_target, repo_path=workspace.path):
         await _run_ssh_cmd(
             ssh_target,
             f"git -C {shlex.quote(workspace.path)} merge --abort",
         )
-        raise RuntimeError(f"Merge failed: {err}")
+        raise RuntimeError(
+            "Merge has conflicts in SSH workspace. "
+            "AI-assisted conflict resolution is currently supported for local workspaces only."
+        )
+
+    await _run_ssh_cmd(
+        ssh_target,
+        f"git -C {shlex.quote(workspace.path)} merge --abort",
+    )
+    raise RuntimeError(f"Merge failed: {err}")
 
 
 async def _remove_worktree(task_id: int, worktree_path: str, workspace: Workspace) -> None:
