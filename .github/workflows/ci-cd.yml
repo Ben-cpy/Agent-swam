@@ -1,0 +1,125 @@
+name: CI-CD
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-cd-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend-ci:
+    name: Backend CI (py${{ matrix.python-version }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.9"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt
+          python -m pip check
+
+      - name: Compile backend and tests
+        run: python -m compileall backend tests
+
+      - name: Run backend regression scripts
+        run: |
+          python tests/test_retry_inplace.py
+          python tests/test_startup.py
+
+  frontend-ci:
+    name: Frontend CI (Node 20)
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run frontend lint
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Run frontend production build
+        run: npm run build
+        working-directory: frontend
+
+  delivery-artifact:
+    name: CD - Delivery Artifact
+    needs: [backend-ci, frontend-ci]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend for delivery bundle
+        run: |
+          npm ci
+          npm run build
+        working-directory: frontend
+
+      - name: Assemble delivery bundle
+        run: |
+          set -euxo pipefail
+          mkdir -p dist
+          cp -R backend dist/backend
+          cp -R scripts dist/scripts
+          mkdir -p dist/frontend
+          cp -R frontend/.next dist/frontend/.next
+          cp frontend/package.json dist/frontend/package.json
+          cp frontend/package-lock.json dist/frontend/package-lock.json
+          cp frontend/next.config.ts dist/frontend/next.config.ts
+          if [ -d frontend/public ]; then cp -R frontend/public dist/frontend/public; fi
+          if [ -f frontend/.env.example ]; then cp frontend/.env.example dist/frontend/.env.example; fi
+          printf "commit=%s\nbuilt_at=%s\n" "${GITHUB_SHA}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > dist/delivery-manifest.txt
+
+      - name: Upload delivery artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-slave-delivery-${{ github.sha }}
+          path: dist
+          retention-days: 14
