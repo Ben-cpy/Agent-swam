@@ -1,4 +1,10 @@
-﻿* **Settings 通知开关（9411478，2026-02-21）**：
+﻿* **task-1 合并入主分支（7848387，2026-02-21）**：
+  - 问题：在 `main` 合并 `task-1` 时，`PROGRESS.md` 出现并行更新冲突，阻塞自动合并。
+  - 解决：手动解决 `PROGRESS.md` 冲突，保留 `main` 的 CI/CD 记录与 `task-1` 的通知开关记录后完成 merge commit `7848387`。
+  - 避免复发：并行分支持续写同一沉淀文档时，合并前优先做一次 `rebase main` 或先拆分独立条目，降低文本冲突概率。
+  - Commit: `7848387`
+
+* **Settings 通知开关（9411478，2026-02-21）**：
   - 问题：`TO_BE_REVIEW` 全局弹窗默认始终开启，缺少用户侧开关，无法按偏好关闭通知。
   - 解决：新增 `frontend/lib/reviewNotificationSettings.ts` 管理本地持久化开关；`frontend/app/settings/page.tsx` 增加通知开关；`frontend/components/ToBeReviewNotifier.tsx` 接入开关监听，关闭时停止轮询与弹窗，开启后即时生效。
   - 避免复发：对全局提醒类能力默认提供显式开关，并让通知触发组件直接订阅该配置，避免“设置页改了但运行态不生效”。
@@ -84,3 +90,4 @@
   - 解决：新增 `.github/workflows/ci-cd.yml`，CI 覆盖后端（ubuntu/windows + Python 3.9、依赖检查、编译、回归脚本）和前端（Node 20、lint、build）；CD 在 `main` push 且 CI 通过后自动打包并上传 delivery artifact。补充 `CI_CD.md` 说明触发条件、检查项和分支保护建议。
   - 避免复发：后续新增功能必须先补对应测试/构建命令并纳入 workflow；合并策略统一依赖必过检查，禁止绕过 CI 直接入主分支。
   - Commit: `cb78637`
+
