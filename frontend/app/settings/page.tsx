@@ -8,6 +8,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  getReviewNotificationEnabled,
+  setReviewNotificationEnabled,
+} from '@/lib/reviewNotificationSettings';
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError<ApiErrorBody>(error)) {
@@ -21,6 +25,8 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
 export default function SettingsPage() {
   const [workspaceMaxParallel, setWorkspaceMaxParallel] = useState('3');
+  const [reviewNotificationsEnabled, setReviewNotificationsEnabled] = useState(true);
+  const [notificationsReady, setNotificationsReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -36,6 +42,11 @@ export default function SettingsPage() {
         setError(getErrorMessage(err, 'Failed to load settings'));
       })
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    setReviewNotificationsEnabled(getReviewNotificationEnabled());
+    setNotificationsReady(true);
   }, []);
 
   const handleSave = async () => {
@@ -58,6 +69,11 @@ export default function SettingsPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleReviewNotificationsToggle = (enabled: boolean) => {
+    setReviewNotificationsEnabled(enabled);
+    setReviewNotificationEnabled(enabled);
   };
 
   return (
@@ -104,6 +120,32 @@ export default function SettingsPage() {
           <Button onClick={handleSave} disabled={loading || saving}>
             {saving ? 'Saving...' : 'Save'}
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Notifications</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-start gap-3">
+            <input
+              id="review-notification-enabled"
+              type="checkbox"
+              className="h-4 w-4 rounded border-gray-300 mt-1"
+              checked={reviewNotificationsEnabled}
+              onChange={(e) => handleReviewNotificationsToggle(e.target.checked)}
+              disabled={!notificationsReady}
+            />
+            <div className="space-y-1">
+              <Label htmlFor="review-notification-enabled">
+                Notify when task enters TO_BE_REVIEW
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Browser popup notification. Silent mode stays enabled.
+              </p>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -1,9 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import useSWR from 'swr';
 import { taskAPI } from '@/lib/api';
 import { Task, TaskStatus } from '@/lib/types';
+import {
+  getReviewNotificationEnabled,
+  REVIEW_NOTIFICATION_ENABLED_KEY,
+  REVIEW_NOTIFICATION_SETTING_EVENT,
+} from '@/lib/reviewNotificationSettings';
 
 const NOTIFICATION_PERMISSION_KEY = 'review_notification_permission_requested_v1';
 const POLL_INTERVAL_MS = 2000;
@@ -41,19 +46,50 @@ function requestNotificationPermissionOnce() {
 export default function ToBeReviewNotifier() {
   const previousStatusByTask = useRef<Map<number, TaskStatus>>(new Map());
   const initialized = useRef(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
 
   const { data } = useSWR(
-    '/tasks/review-notifier',
+    notificationsEnabled ? '/tasks/review-notifier' : null,
     () => taskAPI.list(),
     { refreshInterval: POLL_INTERVAL_MS, revalidateOnFocus: true }
   );
   const tasks = useMemo(() => data?.data ?? [], [data?.data]);
 
   useEffect(() => {
-    requestNotificationPermissionOnce();
+    if (typeof window === 'undefined') return;
+
+    const syncEnabled = () => {
+      setNotificationsEnabled(getReviewNotificationEnabled());
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === REVIEW_NOTIFICATION_ENABLED_KEY) {
+        syncEnabled();
+      }
+    };
+
+    syncEnabled();
+    window.addEventListener(REVIEW_NOTIFICATION_SETTING_EVENT, syncEnabled);
+    window.addEventListener('storage', onStorage);
+
+    return () => {
+      window.removeEventListener(REVIEW_NOTIFICATION_SETTING_EVENT, syncEnabled);
+      window.removeEventListener('storage', onStorage);
+    };
   }, []);
 
   useEffect(() => {
+    if (!notificationsEnabled) {
+      previousStatusByTask.current.clear();
+      initialized.current = false;
+      return;
+    }
+
+    requestNotificationPermissionOnce();
+  }, [notificationsEnabled]);
+
+  useEffect(() => {
+    if (!notificationsEnabled) return;
+
     const previousMap = previousStatusByTask.current;
 
     if (!initialized.current) {
@@ -88,7 +124,7 @@ export default function ToBeReviewNotifier() {
 
     previousMap.clear();
     tasks.forEach((task) => previousMap.set(task.id, task.status));
-  }, [tasks]);
+  }, [notificationsEnabled, tasks]);
 
   return null;
 }
