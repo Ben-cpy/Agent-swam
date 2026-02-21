@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
 from models import Task, Workspace, Runner, TaskStatus, RunnerStatus
 from core.executor import TaskExecutor
+from core.task_reconciler import TaskReconciler
 from datetime import datetime, timedelta, timezone
 from config import settings
 import asyncio
@@ -27,6 +28,7 @@ class TaskScheduler:
         self.running = False
         self.scheduler_task = None
         self._unsupported_backend_logged: set[tuple[int, str]] = set()
+        self.reconciler = TaskReconciler(db_session_maker)
 
     async def start(self):
         """Start the scheduler background task"""
@@ -65,6 +67,10 @@ class TaskScheduler:
         Single scheduler tick: find TODO tasks and dispatch them if possible.
         """
         async with self.db_session_maker() as db:
+            reconciled = await self.reconciler.reconcile_once(db=db)
+            if reconciled > 0:
+                logger.info("Reconciled %s dangling task(s)", reconciled)
+
             # Find TODO tasks ordered by creation time
             result = await db.execute(
                 select(Task)
