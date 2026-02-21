@@ -96,3 +96,9 @@
   - 解决：新增 `backend/core/task_reconciler.py` 并接入 scheduler 每轮巡检，自动清理失效 worktree 引用、执行 `git worktree prune`、并将已外部合并/分支缺失的 `TO_BE_REVIEW` 任务自动闭环为 `DONE`；同时强化 `executor._create_worktree`，仅复用有效 git worktree，空目录自动清理，异常路径自动回退到恢复路径；`merge` 接口改为在 worktree 缺失时仍可按分支完成合并，并在清理阶段补 `worktree prune`。
   - 避免复发：所有路径存在即复用的逻辑必须先做 git worktree 有效性校验；状态机需定期与 Git 真实状态对账，避免仅依赖 DB 字段导致长期空悬。
   - Commit: `05420fd`
+
+* **Claude/Codex 超长单行日志触发 LimitOverrunError 修复（76ef41c，2026-02-21）**：
+  - 问题：`asyncio` 的 `StreamReader` 默认单行限制约 64KB，Claude Code stream-json 在大输出场景会产生超长单行，导致 `LimitOverrunError: Separator is found, but chunk is longer than limit`，任务中断。
+  - 解决：在 `backend/core/adapters/base.py` 的 `asyncio.create_subprocess_exec` 增加 `limit=10 * 1024 * 1024`，将 subprocess stdout 的 `StreamReader` 上限提升到 10MB。
+  - 避免复发：所有基于 `readline()` 的流式子进程读取必须显式设置合理 `limit`，并在接入新 CLI/新输出协议时评估单行峰值大小后统一参数。
+  - Commit: `76ef41c`
