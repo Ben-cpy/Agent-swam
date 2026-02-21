@@ -1,7 +1,12 @@
-﻿* **Retry 语义加固与回归脚本（2b7cd28，2026-02-21）**：
-  - 问题：用户反馈 FAILED 任务点击 Retry 后仍可能出现“新任务/新 worktree”心智负担，需要进一步加固“原任务原地重试”语义并增加可回归验证。
+﻿* **失败任务重试反馈与按钮样式优化（7059f9a，2026-02-21）**：
+  - 问题：任务详情页中 FAILED 任务点击 `Retry Task` 后会触发重试，但界面没有成功反馈，且按钮默认黑色视觉不匹配当前页面风格。
+  - 解决：在 `frontend/app/tasks/[id]/page.tsx` 新增 3 秒自动消失的重试成功提示条（`Task re-queued. Execution will start shortly.`），并将 `Retry Task` 按钮改为 GitHub 风格蓝色（`#0969da`，hover `#0860ca`），同时补充 `Retrying...` 加载文案。
+  - 避免复发：对"状态变更触发后台动作"的按钮统一增加即时 UI 反馈（toast/提示条/状态文案），避免用户误判点击无效。
+  - Commit: `7059f9a`
+* **Retry 语义加固与回归脚本（2b7cd28，2026-02-21）**：
+  - 问题：用户反馈 FAILED 任务点击 Retry 后仍可能出现"新任务/新 worktree"心智负担，需要进一步加固"原任务原地重试"语义并增加可回归验证。
   - 解决：后端在 `retry/continue` 两个入口统一清理 `run_id` 并写入 in-place 重排队日志；新增 `tests/test_retry_inplace.py`，验证 retry 后任务数量不增加、`id/title/worktree_path` 不变、状态 `FAILED -> TODO`。
-  - 避免复发：涉及状态机行为（重试/继续）必须配套最小回归脚本，至少覆盖“实体不复制、上下文不丢失、状态可观测”三项断言。
+  - 避免复发：涉及状态机行为（重试/继续）必须配套最小回归脚本，至少覆盖"实体不复制、上下文不丢失、状态可观测"三项断言。
   - Commit: `2b7cd28`
 * **Copilot 任务卡队列修复（396fadd，2026-02-20）**：
   - 问题：copilot_cli 任务持续停留在 TODO/Queue，scheduler 周期性告警 “Runner does not support backend copilot_cli”。
