@@ -150,6 +150,10 @@ class NextTaskNumberResponse(BaseModel):
     suggested_title: str
 
 
+class TaskPatch(BaseModel):
+    title: Optional[str] = Field(None, max_length=500)
+
+
 class TaskContinueRequest(BaseModel):
     prompt: str = Field(..., max_length=settings.prompt_max_chars)
     model: Optional[str] = None

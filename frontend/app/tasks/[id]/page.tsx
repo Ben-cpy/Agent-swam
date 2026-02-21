@@ -15,7 +15,8 @@ import LogStream from '@/components/LogStream';
 import { formatDistanceToNow } from 'date-fns';
 import { parseUTCDate } from '@/lib/utils';
 import { MAX_PROMPT_CHARS } from '@/lib/limits';
-import { ArrowLeft, GitMerge } from 'lucide-react';
+import { ArrowLeft, GitMerge, Pencil, Check, X } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError<ApiErrorBody>(error)) {
@@ -36,6 +37,9 @@ export default function TaskDetailPage() {
   const [continueLoading, setContinueLoading] = useState(false);
   const [mergeLoading, setMergeLoading] = useState(false);
   const [retryNotice, setRetryNotice] = useState<string | null>(null);
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [titleSaving, setTitleSaving] = useState(false);
 
   useEffect(() => {
     if (!retryNotice) {
@@ -150,6 +154,24 @@ export default function TaskDetailPage() {
     }
   };
 
+  const handleSaveTitle = async () => {
+    const trimmed = titleDraft.trim();
+    if (!trimmed || trimmed === task?.title) {
+      setTitleEditing(false);
+      return;
+    }
+    setTitleSaving(true);
+    try {
+      await taskAPI.updateTitle(taskId, trimmed);
+      mutate();
+      setTitleEditing(false);
+    } catch (error: unknown) {
+      alert(`Failed to update title: ${getErrorMessage(error, 'Unknown error')}`);
+    } finally {
+      setTitleSaving(false);
+    }
+  };
+
   const getStatusBadge = (status: TaskStatus) => {
     const classNames: Record<TaskStatus, string> = {
       [TaskStatus.TODO]: 'bg-slate-100 text-slate-800',
@@ -203,7 +225,49 @@ export default function TaskDetailPage() {
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-3 mb-2">
-            <h1 className="text-3xl font-bold">{task.title}</h1>
+            {titleEditing ? (
+              <>
+                <Input
+                  className="text-2xl font-bold h-auto py-1 w-80 max-w-full"
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveTitle();
+                    if (e.key === 'Escape') setTitleEditing(false);
+                  }}
+                  disabled={titleSaving}
+                  autoFocus
+                  maxLength={500}
+                />
+                <button
+                  onClick={handleSaveTitle}
+                  disabled={titleSaving}
+                  className="p-1 rounded hover:bg-slate-100 text-green-600 disabled:opacity-50"
+                  title="Save"
+                >
+                  <Check className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={() => setTitleEditing(false)}
+                  disabled={titleSaving}
+                  className="p-1 rounded hover:bg-slate-100 text-slate-500 disabled:opacity-50"
+                  title="Cancel"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </>
+            ) : (
+              <>
+                <h1 className="text-3xl font-bold">{task.title}</h1>
+                <button
+                  onClick={() => { setTitleDraft(task.title); setTitleEditing(true); }}
+                  className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600"
+                  title="Edit title"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+              </>
+            )}
             {getStatusBadge(task.status)}
           </div>
           <p className="text-muted-foreground">

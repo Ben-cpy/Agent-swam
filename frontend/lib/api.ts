@@ -56,6 +56,9 @@ export const taskAPI = {
   delete: (id: number) =>
     apiClient.delete<ApiMessage>(`/tasks/${id}`),
 
+  updateTitle: (id: number, title: string) =>
+    apiClient.patch<Task>(`/tasks/${id}`, { title }),
+
   nextNumber: (workspaceId: number) =>
     apiClient.get<NextTaskNumber>('/tasks/next-number', { params: { workspace_id: workspaceId } }),
 };

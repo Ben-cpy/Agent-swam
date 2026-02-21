@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from database import get_db, async_session_maker
 from models import Task, TaskStatus, Workspace, WorkspaceType, Run, BackendType
-from schemas import TaskCreate, TaskResponse, NextTaskNumberResponse, TaskContinueRequest
+from schemas import TaskCreate, TaskResponse, NextTaskNumberResponse, TaskContinueRequest, TaskPatch
 from core.adapters import ClaudeCodeAdapter, CodexAdapter, CopilotAdapter
 from core.executor import TaskExecutor
 from datetime import datetime, timezone
@@ -134,6 +134,34 @@ async def get_task(
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    return task
+
+
+@router.patch("/{task_id}", response_model=TaskResponse)
+async def patch_task(
+    task_id: int,
+    body: TaskPatch,
+    db: AsyncSession = Depends(get_db)
+):
+    """Partially update a task (e.g. rename the title)."""
+    result = await db.execute(
+        select(Task).options(selectinload(Task.run)).where(Task.id == task_id)
+    )
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if body.title is not None:
+        stripped = body.title.strip()
+        if not stripped:
+            raise HTTPException(status_code=422, detail="Title cannot be empty")
+        task.title = stripped
+        task.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(task)
 
     return task
 
