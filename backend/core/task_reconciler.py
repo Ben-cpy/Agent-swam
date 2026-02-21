@@ -55,23 +55,47 @@ class TaskReconciler:
             # If task is waiting for review but branch is already merged/deleted outside web,
             # auto-close it so it no longer stays in TO_BE_REVIEW forever.
             if task.status == TaskStatus.TO_BE_REVIEW:
-                branch_state = await self._get_branch_state(
-                    workspace_path=workspace_path,
-                    task_branch=task_branch,
-                    base_branch=(task.branch_name or "main").strip() or "main",
+                # Re-read status and updated_at directly from DB (column projection)
+                # to bypass the stale SQLAlchemy identity map. The bulk load at the
+                # top of the loop captured a snapshot; the executor may have
+                # committed a fresh TO_BE_REVIEW with a new updated_at since then.
+                fresh = await db.execute(
+                    select(Task.status, Task.updated_at).where(Task.id == task.id)
                 )
-                if branch_state in ("merged", "missing"):
-                    if task.worktree_path:
-                        await self._cleanup_worktree_reference(workspace_path, task.worktree_path)
-                        task.worktree_path = None
-                    await self._delete_branch(workspace_path, task_branch)
-                    task.status = TaskStatus.DONE
-                    task_changed = True
-                    logger.info(
-                        "Task %s auto-closed TO_BE_REVIEW->DONE (branch_state=%s)",
-                        task.id,
-                        branch_state,
+                fresh_row = fresh.one_or_none()
+
+                eligible_for_autoclose = False
+                if fresh_row is not None:
+                    fresh_status, fresh_updated_at = fresh_row
+                    if fresh_status == TaskStatus.TO_BE_REVIEW:
+                        # Grace period: skip auto-close for tasks updated within the
+                        # last 60 s so a freshly-completed run isn't immediately swept
+                        # away before the user has a chance to interact with it.
+                        now_utc = datetime.now(timezone.utc)
+                        updated_dt = fresh_updated_at
+                        if updated_dt.tzinfo is None:
+                            updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+                        if (now_utc - updated_dt).total_seconds() >= 60:
+                            eligible_for_autoclose = True
+
+                if eligible_for_autoclose:
+                    branch_state = await self._get_branch_state(
+                        workspace_path=workspace_path,
+                        task_branch=task_branch,
+                        base_branch=(task.branch_name or "main").strip() or "main",
                     )
+                    if branch_state in ("merged", "missing"):
+                        if task.worktree_path:
+                            await self._cleanup_worktree_reference(workspace_path, task.worktree_path)
+                            task.worktree_path = None
+                        await self._delete_branch(workspace_path, task_branch)
+                        task.status = TaskStatus.DONE
+                        task_changed = True
+                        logger.info(
+                            "Task %s auto-closed TO_BE_REVIEW->DONE (branch_state=%s)",
+                            task.id,
+                            branch_state,
+                        )
 
             if task_changed:
                 task.updated_at = datetime.now(timezone.utc)
