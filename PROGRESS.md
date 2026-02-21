@@ -102,3 +102,9 @@
   - 解决：在 `backend/core/adapters/base.py` 的 `asyncio.create_subprocess_exec` 增加 `limit=10 * 1024 * 1024`，将 subprocess stdout 的 `StreamReader` 上限提升到 10MB。
   - 避免复发：所有基于 `readline()` 的流式子进程读取必须显式设置合理 `limit`，并在接入新 CLI/新输出协议时评估单行峰值大小后统一参数。
   - Commit: `76ef41c`
+
+* **任务审批状态回归修复（22438ec，2026-02-21）**：
+  - 问题：为修复空悬 task 引入的 reconciler 自动闭环逻辑，导致新任务在未审批场景可能被自动从 `TO_BE_REVIEW` 置为 `DONE`，并触发 worktree/分支清理，出现“未合并主干却被关单”的高风险行为。
+  - 解决：移除 `backend/core/task_reconciler.py` 中 `TO_BE_REVIEW -> DONE` 自动状态推进与自动删分支逻辑，只保留失效 worktree 引用清理；新增 `POST /api/tasks/{id}/mark-done` 手动完结接口；前端任务详情页新增 `Mark as Done` 按钮；回归脚本更新为“reconciler 不自动关单”，并新增 `tests/test_mark_done.py`。
+  - 避免复发：reconciler 只能做“引用修复/一致性修复”，不得做审批语义状态推进；任何会把任务置为 `DONE` 的路径必须是显式用户动作（merge 或 mark done），并配套回归测试覆盖。
+  - Commit: `22438ec`
