@@ -145,6 +145,24 @@ async def patch_task(
     db: AsyncSession = Depends(get_db)
 ):
     """Partially update a task (e.g. rename the title)."""
+    return await _update_task(task_id=task_id, body=body, db=db)
+
+
+@router.post("/{task_id}/rename", response_model=TaskResponse)
+async def rename_task(
+    task_id: int,
+    body: TaskPatch,
+    db: AsyncSession = Depends(get_db)
+):
+    """Rename task title via POST for environments that block PATCH."""
+    return await _update_task(task_id=task_id, body=body, db=db)
+
+
+async def _update_task(
+    task_id: int,
+    body: TaskPatch,
+    db: AsyncSession
+) -> Task:
     result = await db.execute(
         select(Task).options(selectinload(Task.run)).where(Task.id == task_id)
     )

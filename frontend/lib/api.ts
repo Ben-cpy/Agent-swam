@@ -59,8 +59,16 @@ export const taskAPI = {
   delete: (id: number) =>
     apiClient.delete<ApiMessage>(`/tasks/${id}`),
 
-  updateTitle: (id: number, title: string) =>
-    apiClient.patch<Task>(`/tasks/${id}`, { title }),
+  updateTitle: async (id: number, title: string) => {
+    try {
+      return await apiClient.post<Task>(`/tasks/${id}/rename`, { title });
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return apiClient.patch<Task>(`/tasks/${id}`, { title });
+      }
+      throw error;
+    }
+  },
 
   nextNumber: (workspaceId: number) =>
     apiClient.get<NextTaskNumber>('/tasks/next-number', { params: { workspace_id: workspaceId } }),
