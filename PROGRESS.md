@@ -1,4 +1,9 @@
-﻿* **task-1 合并入主分支（7848387，2026-02-21）**：
+﻿* **任务标题修改 405 修复（66310ee，2026-02-21）**：
+  - 问题：任务详情页保存标题时报错 `Failed to update title: Method Not Allowed`，`PATCH /api/tasks/{id}` 在部分环境存在方法受限导致失败。
+  - 解决：后端新增 `POST /api/tasks/{id}/rename` 复用同一更新逻辑；前端 `taskAPI.updateTitle` 改为优先调用 POST，并在后端尚未升级时对 404 回退到原 PATCH。
+  - 避免复发：对关键写操作提供“兼容方法通道”（如 POST action endpoint）与客户端回退策略，避免被网关/代理的 HTTP 方法限制卡死核心功能。
+  - Commit: `66310ee`
+* **task-1 合并入主分支（7848387，2026-02-21）**：
   - 问题：在 `main` 合并 `task-1` 时，`PROGRESS.md` 出现并行更新冲突，阻塞自动合并。
   - 解决：手动解决 `PROGRESS.md` 冲突，保留 `main` 的 CI/CD 记录与 `task-1` 的通知开关记录后完成 merge commit `7848387`。
   - 避免复发：并行分支持续写同一沉淀文档时，合并前优先做一次 `rebase main` 或先拆分独立条目，降低文本冲突概率。
@@ -108,3 +113,4 @@
   - 解决：移除 `backend/core/task_reconciler.py` 中 `TO_BE_REVIEW -> DONE` 自动状态推进与自动删分支逻辑，只保留失效 worktree 引用清理；新增 `POST /api/tasks/{id}/mark-done` 手动完结接口；前端任务详情页新增 `Mark as Done` 按钮；回归脚本更新为“reconciler 不自动关单”，并新增 `tests/test_mark_done.py`。
   - 避免复发：reconciler 只能做“引用修复/一致性修复”，不得做审批语义状态推进；任何会把任务置为 `DONE` 的路径必须是显式用户动作（merge 或 mark done），并配套回归测试覆盖。
   - Commit: `22438ec`
+
