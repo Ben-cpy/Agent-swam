@@ -1,4 +1,9 @@
-﻿* **Copilot 任务卡队列修复（396fadd，2026-02-20）**：
+﻿* **失败任务重试反馈与按钮样式优化（7059f9a，2026-02-21）**：
+  - 问题：任务详情页中 FAILED 任务点击 `Retry Task` 后会触发重试，但界面没有成功反馈，且按钮默认黑色视觉不匹配当前页面风格。
+  - 解决：在 `frontend/app/tasks/[id]/page.tsx` 新增 3 秒自动消失的重试成功提示条（`Task re-queued. Execution will start shortly.`），并将 `Retry Task` 按钮改为 GitHub 风格蓝色（`#0969da`，hover `#0860ca`），同时补充 `Retrying...` 加载文案。
+  - 避免复发：对“状态变更触发后台动作”的按钮统一增加即时 UI 反馈（toast/提示条/状态文案），避免用户误判点击无效。
+  - Commit: `7059f9a`
+* **Copilot 任务卡队列修复（396fadd，2026-02-20）**：
   - 问题：copilot_cli 任务持续停留在 TODO/Queue，scheduler 周期性告警 “Runner does not support backend copilot_cli”。
   - 解决：LocalRunnerAgent 的 runner capabilities 改为从 BackendType 枚举动态生成，确保包含 copilot_cli；同时给 scheduler 增加“不支持 backend”告警去重，避免每轮刷屏。
   - 避免复发：新增 backend 时统一从单一枚举源派生能力列表，禁止在 runner 注册里写死字符串常量。
@@ -47,3 +52,4 @@
   - 解决：手动合并冲突块，保留双方有效记录后完成 merge commit。
   - 避免复发：并行分支都维护同一沉淀文档时，合并前先 rebase 或提前拆分独立条目，降低冲突概率。
   - Commit: `0747361`
+
