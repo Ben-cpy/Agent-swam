@@ -535,7 +535,10 @@ class TaskExecutor:
                 run.exit_code = 130
                 run.error_class = ErrorClass.UNKNOWN
                 task.status = TaskStatus.FAILED
-            elif is_quota_error:
+            # Quota classification is meaningful only on failed executions.
+            # Some adapters can emit benign text containing quota-like tokens
+            # (e.g., code identifiers), so do not override a successful run.
+            elif is_quota_error and not success:
                 run.exit_code = exit_code
                 run.error_class = ErrorClass.QUOTA
                 task.status = TaskStatus.FAILED

@@ -1,6 +1,7 @@
 from typing import AsyncIterator, Optional, Callable, Awaitable, Union
 from .base import BackendAdapter
 from .cli_resolver import apply_windows_env_overrides, resolve_cli
+import re
 
 
 class CopilotAdapter(BackendAdapter):
@@ -68,12 +69,21 @@ class CopilotAdapter(BackendAdapter):
     def _scan_for_quota_keywords(self, text: str):
         """Scan for quota/rate-limit error keywords in plain-text output."""
         lower = text.lower()
-        quota_keywords = [
-            "rate limit", "rate_limit", "quota exceeded",
-            "insufficient credit", "billing error", "usage limit",
-            "overloaded", "too many requests", "429",
+        quota_phrases = [
+            "rate limit",
+            "rate_limit",
+            "quota exceeded",
+            "insufficient credit",
+            "billing error",
+            "usage limit",
+            "overloaded",
+            "too many requests",
         ]
-        if any(kw in lower for kw in quota_keywords):
+        has_429_signal = bool(
+            re.search(r"\b(?:http|status|error|code)\s*[:=-]?\s*429\b", lower)
+            or re.search(r"\b429\b.*\b(?:too many requests|rate limit|quota)\b", lower)
+        )
+        if any(kw in lower for kw in quota_phrases) or has_429_signal:
             self._is_quota_error = True
 
     def parse_exit_code(self, return_code: int) -> tuple[bool, Optional[str]]:
