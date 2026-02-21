@@ -1,4 +1,10 @@
-﻿* **任务标题修改 405 修复（66310ee，2026-02-21）**：
+﻿* **Merge 流程健壮性补强（11199d3，2026-02-21）**：
+  - 问题：用户在点击任务 Merge 时仍会遇到高频失败，包括基线 workspace/任务 worktree 存在未提交改动、历史 merge 残留状态阻塞、worktree 路径失效后无法按分支继续合并，以及 AI 冲突兜底仅按退出码判定导致误报失败。
+  - 解决：重构 backend/api/tasks.py 合并链路，新增“合并前自动恢复”与“可选 worktree”机制：先自动 merge --abort 清理遗留状态；对 task/workspace 两侧未提交改动自动提交后再 merge；worktree 缺失时允许直接按 task 分支合并；冲突时仅触发一次 AI fallback，并在 AI 后按 Git 实际状态（unmerged files 与 MERGE_HEAD）做最终判定。同步在 backend/core/adapters/codex.py 为非交互执行增加 --ask-for-approval never，避免自动兜底卡在审批提示。新增 tests/test_merge_robust.py 回归场景覆盖基线脏工作区自动提交与无 worktree 路径分支合并。
+  - 避免复发：Merge 入口必须遵循“规则优先、AI兜底、状态可恢复”的统一流程，且每次改动都要覆盖真实失败边界（base dirty/worktree missing/stale MERGE_HEAD）并回归验证。
+  - Commit: `11199d3`
+
+* **任务标题修改 405 修复（66310ee，2026-02-21）**：
   - 问题：任务详情页保存标题时报错 `Failed to update title: Method Not Allowed`，`PATCH /api/tasks/{id}` 在部分环境存在方法受限导致失败。
   - 解决：后端新增 `POST /api/tasks/{id}/rename` 复用同一更新逻辑；前端 `taskAPI.updateTitle` 改为优先调用 POST，并在后端尚未升级时对 404 回退到原 PATCH。
   - 避免复发：对关键写操作提供“兼容方法通道”（如 POST action endpoint）与客户端回退策略，避免被网关/代理的 HTTP 方法限制卡死核心功能。
@@ -113,4 +119,5 @@
   - 解决：移除 `backend/core/task_reconciler.py` 中 `TO_BE_REVIEW -> DONE` 自动状态推进与自动删分支逻辑，只保留失效 worktree 引用清理；新增 `POST /api/tasks/{id}/mark-done` 手动完结接口；前端任务详情页新增 `Mark as Done` 按钮；回归脚本更新为“reconciler 不自动关单”，并新增 `tests/test_mark_done.py`。
   - 避免复发：reconciler 只能做“引用修复/一致性修复”，不得做审批语义状态推进；任何会把任务置为 `DONE` 的路径必须是显式用户动作（merge 或 mark done），并配套回归测试覆盖。
   - Commit: `22438ec`
+
 
