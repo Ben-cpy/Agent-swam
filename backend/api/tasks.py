@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import re
 import shlex
 
@@ -254,12 +255,6 @@ async def merge_task(
             detail="Only TO_BE_REVIEW tasks can be merged"
         )
 
-    if not task.worktree_path:
-        raise HTTPException(
-            status_code=400,
-            detail="Task has no worktree; merge action is only available for worktree tasks"
-        )
-
     workspace_result = await db.execute(
         select(Workspace).where(Workspace.workspace_id == task.workspace_id)
     )
@@ -290,7 +285,8 @@ async def merge_task(
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    await _remove_worktree(task_id, task.worktree_path, workspace)
+    if task.worktree_path:
+        await _remove_worktree(task_id, task.worktree_path, workspace)
 
     task.status = TaskStatus.DONE
     task.worktree_path = None
@@ -706,7 +702,7 @@ async def _merge_on_local_workspace(
 async def _merge_on_ssh_workspace(
     workspace: Workspace,
     task: Task,
-    worktree_path: str,
+    worktree_path: Optional[str],
     target_branch: str,
     preferred_task_branch: str,
 ) -> None:
@@ -717,11 +713,12 @@ async def _merge_on_ssh_workspace(
         f"{workspace.ssh_user}@{workspace.host}" if workspace.ssh_user else workspace.host
     )
 
-    await _auto_commit_worktree_changes_ssh(
-        ssh_target=ssh_target,
-        worktree_path=worktree_path,
-        task_id=task.id,
-    )
+    if worktree_path:
+        await _auto_commit_worktree_changes_ssh(
+            ssh_target=ssh_target,
+            worktree_path=worktree_path,
+            task_id=task.id,
+        )
     await _ensure_clean_base_workspace_ssh(ssh_target=ssh_target, workspace_path=workspace.path)
 
     rc, _out, err = await _run_ssh_cmd(
@@ -805,6 +802,15 @@ async def _remove_worktree(task_id: int, worktree_path: str, workspace: Workspac
                 "git worktree remove failed for task %s (ssh): %s", task_id, err
             )
 
+        rc, err = await _run_cmd(
+            ["ssh", ssh_target,
+             f"git -C {shlex.quote(workspace.path)} worktree prune"]
+        )
+        if rc != 0:
+            logger.warning(
+                "git worktree prune failed for task %s (ssh): %s", task_id, err
+            )
+
         # Step 2: delete the task branch from the main repo
         rc, err = await _run_cmd(
             ["ssh", ssh_target,
@@ -824,6 +830,26 @@ async def _remove_worktree(task_id: int, worktree_path: str, workspace: Workspac
             logger.warning(
                 "git worktree remove failed for task %s: %s", task_id, err
             )
+
+        rc, err = await _run_cmd(
+            ["git", "-C", workspace.path, "worktree", "prune"]
+        )
+        if rc != 0:
+            logger.warning(
+                "git worktree prune failed for task %s: %s", task_id, err
+            )
+
+        if os.path.isdir(worktree_path):
+            try:
+                if not os.listdir(worktree_path):
+                    os.rmdir(worktree_path)
+            except OSError as exc:
+                logger.warning(
+                    "Failed to remove stale worktree directory %s for task %s: %s",
+                    worktree_path,
+                    task_id,
+                    exc,
+                )
 
         # Step 2: delete the task branch from the main repo
         rc, err = await _run_cmd(
