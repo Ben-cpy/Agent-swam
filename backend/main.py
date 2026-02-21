@@ -39,9 +39,6 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup and shutdown events
-    # Startup
-    # logger.info(Starting AI Task Manager backend...)
-
     # Initialize database
     await init_db()
 

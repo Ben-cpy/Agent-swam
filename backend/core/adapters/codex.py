@@ -119,36 +119,6 @@ class CodexAdapter(BackendAdapter):
             if any(kw in msg for kw in quota_signals) or any(kw in code_str for kw in quota_signals):
                 self._is_quota_error = True
 
-    def _format_jsonl_line(self, line: str) -> Optional[str]:
-        """
-        Format JSONL line into readable log output.
-
-        Returns:
-            Formatted string or None if line should be skipped
-        """
-        try:
-            event = json.loads(line)
-            event_type = event.get("type", "")
-
-            if event_type == "message.text":
-                return f"[Agent] {event.get('text', '')}\n"
-            elif event_type == "tool.use":
-                tool_name = event.get("name", "unknown")
-                return f"[Tool] {tool_name}\n"
-            elif event_type == "turn.started":
-                return "[Turn started]\n"
-            elif event_type == "turn.completed":
-                return "[Turn completed]\n"
-            elif event_type == "error":
-                return f"[ERROR] {event.get('message', 'Unknown error')}\n"
-            else:
-                # Include raw event for debugging
-                return f"[{event_type}] {line}"
-        except json.JSONDecodeError:
-            # Not valid JSON, return as-is
-            return line
-        except Exception as e:
-            return f"[Parse error: {e}] {line}"
 
     def parse_exit_code(self, return_code: int) -> tuple[bool, Optional[str]]:
         """
