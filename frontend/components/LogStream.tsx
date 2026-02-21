@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, type ReactNode } from 'react';
+import { useEffect, useState, useRef, useMemo, type ReactNode } from 'react';
 import { logAPI } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -27,6 +27,26 @@ type LogEntry =
   | { type: 'copilot_stats'; content: string }
   // Common
   | { type: 'plain'; content: string };
+
+type FilterMode = 'summary' | 'full';
+
+/** Entry types shown in summary mode — noisy details are excluded */
+const SUMMARY_TYPES = new Set([
+  'text', 'tool_use', 'result',
+  'codex_message', 'codex_command', 'codex_error',
+  'copilot_text', 'copilot_section', 'copilot_error', 'copilot_stats',
+]);
+
+function isSummaryEntry(entry: LogEntry): boolean {
+  if (SUMMARY_TYPES.has(entry.type)) return true;
+  // plain: only process-exit markers
+  if (entry.type === 'plain') return entry.content.startsWith('[Process');
+  // copilot_tool: invocations (●) yes, result lines (└) no
+  if (entry.type === 'copilot_tool') return entry.action === '●';
+  return false;
+}
+
+const RENDER_LIMIT = 500;
 
 interface LogStreamProps {
   runId: number;
@@ -508,6 +528,7 @@ export default function LogStream({
   const [logs, setLogs] = useState<LogEntry[]>(
     initialLogs ? processRawLogs(initialLogs, backend) : []
   );
+  const [filterMode, setFilterMode] = useState<FilterMode>('summary');
   const [isComplete, setIsComplete] = useState(false);
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -630,12 +651,44 @@ export default function LogStream({
     }
   }, [runId, initialLogs, backend]);
 
+  // Filtered + windowed log entries for display
+  const { displayEntries, hiddenCount } = useMemo(() => {
+    const filtered = filterMode === 'summary' ? logs.filter(isSummaryEntry) : logs;
+    if (filtered.length > RENDER_LIMIT) {
+      return { displayEntries: filtered.slice(-RENDER_LIMIT), hiddenCount: filtered.length - RENDER_LIMIT };
+    }
+    return { displayEntries: filtered, hiddenCount: 0 };
+  }, [logs, filterMode]);
+
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <CardTitle>Execution Logs</CardTitle>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Filter mode toggle */}
+            <div className="flex rounded overflow-hidden border border-slate-700 text-xs select-none">
+              <button
+                onClick={() => setFilterMode('summary')}
+                className={`px-2.5 py-1 transition-colors ${
+                  filterMode === 'summary'
+                    ? 'bg-slate-700 text-slate-50'
+                    : 'bg-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Summary
+              </button>
+              <button
+                onClick={() => setFilterMode('full')}
+                className={`px-2.5 py-1 transition-colors ${
+                  filterMode === 'full'
+                    ? 'bg-slate-700 text-slate-50'
+                    : 'bg-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Full
+              </button>
+            </div>
             {headerActions}
             {!isComplete && (
               <div className="flex items-center gap-2">
@@ -668,12 +721,28 @@ export default function LogStream({
           ref={logContainerRef}
           className="bg-slate-900 text-slate-50 p-4 rounded-lg font-mono text-sm h-[600px] overflow-y-auto"
         >
-          {logs.length === 0 && (
-            <div className="text-slate-400 text-sm">
-              {isComplete ? 'No logs available.' : 'Waiting for logs…'}
+          {hiddenCount > 0 && (
+            <div className="text-slate-500 text-xs italic mb-3 text-center">
+              ↑ {hiddenCount} earlier entries hidden (showing last {RENDER_LIMIT})
+              {' '}
+              <button
+                onClick={() => setFilterMode('full')}
+                className="underline hover:text-slate-300 transition-colors"
+              >
+                switch to Full to see all
+              </button>
             </div>
           )}
-          {logs.map((entry, index) => (
+          {displayEntries.length === 0 && (
+            <div className="text-slate-400 text-sm">
+              {isComplete
+                ? filterMode === 'summary'
+                  ? 'No key events. Switch to Full to see raw output.'
+                  : 'No logs available.'
+                : 'Waiting for logs…'}
+            </div>
+          )}
+          {displayEntries.map((entry, index) => (
             <LogEntryView key={index} entry={entry} />
           ))}
         </div>
