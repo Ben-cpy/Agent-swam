@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { formatDistanceToNow } from 'date-fns';
 import { parseUTCDate } from '@/lib/utils';
-import { Trash2 } from 'lucide-react';
+import { Trash2, CheckCheck } from 'lucide-react';
 import { taskAPI } from '@/lib/api';
 
 interface TaskCardProps {
@@ -29,6 +29,7 @@ function formatElapsed(seconds: number): string {
 export default function TaskCard({ task, isQueued = false, onDeleted }: TaskCardProps) {
   const [elapsed, setElapsed] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [markingDone, setMarkingDone] = useState(false);
 
   useEffect(() => {
     if (task.status !== TaskStatus.RUNNING) {
@@ -85,7 +86,22 @@ export default function TaskCard({ task, isQueued = false, onDeleted }: TaskCard
     }
   };
 
+  const handleMarkDone = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm(`Mark task "${task.title}" as Done?`)) return;
+    setMarkingDone(true);
+    try {
+      await taskAPI.markDone(task.id);
+      onDeleted?.();
+    } catch {
+      alert('Failed to mark task as done');
+      setMarkingDone(false);
+    }
+  };
+
   const canDelete = task.status !== TaskStatus.RUNNING;
+  const canMarkDone = task.status === TaskStatus.TO_BE_REVIEW;
 
   return (
     <Link href={`/tasks/${task.id}`}>
@@ -99,6 +115,16 @@ export default function TaskCard({ task, isQueued = false, onDeleted }: TaskCard
               <span className="flex items-center justify-center w-7 h-7">
                 {getBackendIcon(task.backend)}
               </span>
+              {canMarkDone && (
+                <button
+                  onClick={handleMarkDone}
+                  disabled={markingDone}
+                  title="Mark as Done"
+                  className="flex items-center justify-center w-6 h-6 rounded text-amber-700/50 hover:text-amber-800 hover:bg-amber-50 transition-colors disabled:opacity-40"
+                >
+                  <CheckCheck className="w-3.5 h-3.5" />
+                </button>
+              )}
               {canDelete && (
                 <button
                   onClick={handleDelete}
