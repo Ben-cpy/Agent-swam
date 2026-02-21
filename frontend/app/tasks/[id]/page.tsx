@@ -423,22 +423,19 @@ export default function TaskDetailPage() {
           {/* Row 5: Prompt */}
           <div>
             <label className="text-sm font-medium text-muted-foreground">Prompt</label>
-            <div className="mt-1 bg-slate-50 rounded-lg font-mono text-sm overflow-y-auto max-h-72">
+            <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden overflow-y-auto max-h-72">
               {(() => {
                 const history = task.prompt_history && task.prompt_history.length > 0
                   ? task.prompt_history
                   : [task.prompt];
                 return history.map((turn, idx) => (
-                  <div key={idx}>
+                  <div key={idx} className={idx < history.length - 1 ? "border-b border-slate-200" : ""}>
                     {history.length > 1 && (
-                      <div className="px-4 pt-3 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wide select-none">
+                      <div className="px-4 py-2 text-xs font-medium text-slate-400 uppercase tracking-wider select-none bg-slate-100/70 border-b border-slate-200">
                         Turn {idx + 1}
                       </div>
                     )}
-                    <div className="px-4 pb-3 whitespace-pre-wrap">{turn}</div>
-                    {idx < history.length - 1 && (
-                      <div className="border-t border-slate-200 mx-4" />
-                    )}
+                    <div className="px-4 py-3 text-sm font-mono whitespace-pre-wrap leading-relaxed text-slate-700">{turn}</div>
                   </div>
                 ));
               })()}
