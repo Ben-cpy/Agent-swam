@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 
 export default function Navbar() {
@@ -19,8 +20,9 @@ export default function Navbar() {
         <div className="flex items-center justify-between">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2">
+            <Image src="/icon.svg" alt="Agent Swarm" width={36} height={36} />
             <div className="text-2xl font-bold text-primary">
-              AI Task Manager
+              Agent Swarm
             </div>
           </Link>
 

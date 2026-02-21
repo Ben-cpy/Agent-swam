@@ -4,7 +4,7 @@ import Navbar from "@/components/Navbar";
 import ToBeReviewNotifier from "@/components/ToBeReviewNotifier";
 
 export const metadata: Metadata = {
-  title: "AI Task Manager",
+  title: "Agent Swarm",
   description: "Manage AI tasks with Claude Code and Codex CLI",
 };
 
