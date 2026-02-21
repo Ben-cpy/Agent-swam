@@ -1,6 +1,6 @@
 from typing import AsyncIterator, Optional, Callable, Awaitable, Union
 from .base import BackendAdapter
-from .cli_resolver import resolve_cli
+from .cli_resolver import apply_windows_env_overrides, resolve_cli
 import json
 import os
 
@@ -62,6 +62,7 @@ class ClaudeCodeAdapter(BackendAdapter):
         env = os.environ.copy()
         if "CLAUDECODE" in env:
             del env["CLAUDECODE"]
+        env = apply_windows_env_overrides(env, cli_name="claude")
 
         exit_code = 0
 

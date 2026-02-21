@@ -1,6 +1,6 @@
 from typing import AsyncIterator, Optional, Callable, Awaitable, Union
 from .base import BackendAdapter
-from .cli_resolver import resolve_cli
+from .cli_resolver import apply_windows_env_overrides, resolve_cli
 
 
 class CopilotAdapter(BackendAdapter):
@@ -49,9 +49,11 @@ class CopilotAdapter(BackendAdapter):
             return
 
         exit_code = 0
+        env = apply_windows_env_overrides(cli_name="copilot")
 
         async for line, code in self.run_subprocess(
             cmd,
+            env=env,
             should_terminate=should_terminate,
             cli_name="copilot",
         ):

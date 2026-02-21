@@ -1,6 +1,6 @@
 from typing import AsyncIterator, Optional, Callable, Awaitable, Union
 from .base import BackendAdapter
-from .cli_resolver import resolve_cli
+from .cli_resolver import apply_windows_env_overrides, build_windows_env_overrides, resolve_cli
 import json
 
 
@@ -34,6 +34,12 @@ class CodexAdapter(BackendAdapter):
             "--cd", self.workspace_path,  # Set working directory
             "--skip-git-repo-check",  # Allow running outside git repo
         ]
+        windows_shell_env = build_windows_env_overrides(cli_name="codex")
+        for key in ("COMSPEC", "SHELL"):
+            value = windows_shell_env.get(key)
+            if value:
+                # Pass shell hints into Codex tool subprocess env.
+                cmd += ["-c", f"shell_environment_policy.set.{key}={json.dumps(value)}"]
         if self.model:
             cmd += ["--model", self.model]
         if self.reasoning_effort:
@@ -63,9 +69,11 @@ class CodexAdapter(BackendAdapter):
             return
 
         exit_code = 0
+        env = apply_windows_env_overrides(cli_name="codex")
 
         async for line, code in self.run_subprocess(
             cmd,
+            env=env,
             stdin_data=prompt,
             should_terminate=should_terminate,
             cli_name="codex",
