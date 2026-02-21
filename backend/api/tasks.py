@@ -19,8 +19,14 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 
 def _set_task_for_requeue(task: Task, prompt: str, model: Optional[str] = None) -> None:
-    """Prepare a task for re-execution in the same worktree."""
+    """Prepare a task for re-execution in the same worktree, appending the new prompt to history."""
+    # Build history before overwriting task.prompt
+    history: list = list(task.prompt_history) if task.prompt_history else [task.prompt]
+    # Only append when the prompt actually changes (continue vs retry)
+    if prompt != task.prompt:
+        history.append(prompt)
     task.prompt = prompt
+    task.prompt_history = history
     if model is not None:
         task.model = model
     task.status = TaskStatus.TODO
@@ -47,6 +53,7 @@ async def create_task(
     new_task = Task(
         title=task.title,
         prompt=task.prompt,
+        prompt_history=[task.prompt],
         workspace_id=task.workspace_id,
         backend=task.backend,
         branch_name=task.branch_name,

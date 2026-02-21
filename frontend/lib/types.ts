@@ -34,6 +34,7 @@ export interface Task {
   permission_mode?: string | null;
   run_started_at?: string | null;
   usage_json?: string | null;
+  prompt_history?: string[] | null;
 }
 
 export interface TaskCreateInput {
