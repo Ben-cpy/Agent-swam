@@ -137,7 +137,7 @@ def build_windows_command_variants(cli_name: str, args: List[str], direct_cmd: L
 
     for shell_name, shell_path in resolve_windows_shell_priority():
         if shell_name == "git-bash":
-            variants.append((shell_name, [shell_path, "-lc", shlex.join(shell_argv)]))
+            variants.append((shell_name, [shell_path, "-c", shlex.join(shell_argv)]))
         elif shell_name == "cmd":
             variants.append((shell_name, [shell_path, "/d", "/s", "/c", subprocess.list2cmdline(direct_argv)]))
         elif shell_name == "powershell":
