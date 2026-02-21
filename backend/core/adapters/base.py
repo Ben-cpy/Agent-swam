@@ -72,6 +72,8 @@ class BackendAdapter(ABC):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 stdin=asyncio.subprocess.PIPE if stdin_data is not None else None,
+                # Increase StreamReader line limit to handle large single-line JSON output.
+                limit=10 * 1024 * 1024,
                 cwd=self.workspace_path,
                 env=env,
             )
