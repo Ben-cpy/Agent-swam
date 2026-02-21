@@ -121,6 +121,17 @@ class BackendAdapter(ABC):
             exit_code = await process.wait()
             yield ("", exit_code)  # Final yield with exit code
 
+        def _is_shell_init_noise(line: str) -> bool:
+            """Filter out shell login-profile initialization noise (e.g. conda warnings)."""
+            noise_patterns = [
+                "did not find path entry",
+                "conda initialize",
+                ">>> conda init",
+                "<<< conda init",
+            ]
+            lower = line.lower()
+            return any(p in lower for p in noise_patterns)
+
         def _is_command_not_found(code: int, output_lines: List[str]) -> bool:
             if code in (127, 9009):
                 return True
@@ -142,6 +153,8 @@ class BackendAdapter(ABC):
                 final_code = 0
                 async for line, code in _run_once(variant_cmd):
                     if line:
+                        if _is_shell_init_noise(line):
+                            continue
                         buffered_lines.append(line)
                     if code != 0:
                         final_code = code
