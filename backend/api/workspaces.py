@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Dict, List, Optional
+from pathlib import Path
 from database import get_db
 from core.settings_service import get_workspace_max_parallel
 from models import Workspace, Runner, WorkspaceType, Task, TaskStatus, Run
@@ -329,3 +330,139 @@ async def get_workspace_resources(
         memory = _parse_memory_linux(mem_raw)
 
     return WorkspaceResourcesResponse(gpu=gpu, gpu_available=gpu_available, memory=memory)
+
+
+# ---------------------------------------------------------------------------
+# File listing for @mention autocomplete
+# ---------------------------------------------------------------------------
+
+_IGNORE_DIRS: frozenset[str] = frozenset({
+    ".git", "node_modules", "__pycache__", ".next", "dist", "build",
+    ".venv", "venv", "env", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    "target", ".cargo", "vendor", "coverage", ".nyc_output", "tasks",
+    ".idea", ".vscode", "out", "tmp", ".turbo",
+})
+
+
+def _fuzzy_score(rel_path: str, query: str) -> int:
+    """Return a match score for rel_path vs query (0 = no match, higher = better)."""
+    if not query:
+        return 1  # return everything when no query
+
+    q = query.lower()
+    basename = Path(rel_path).name.lower()
+    stem = Path(rel_path).stem.lower()
+    path_lc = rel_path.lower()
+
+    if basename == q or stem == q:
+        return 1000
+    if basename.startswith(q) or stem.startswith(q):
+        return 900
+    if q in basename:
+        return 700
+    if q in path_lc:
+        return 500
+
+    # Subsequence match in basename (e.g. "tsf" → "TaskForm")
+    pi = 0
+    for ch in basename:
+        if pi < len(q) and ch == q[pi]:
+            pi += 1
+    if pi == len(q):
+        return 300
+
+    # Subsequence match anywhere in path
+    pi = 0
+    for ch in path_lc:
+        if pi < len(q) and ch == q[pi]:
+            pi += 1
+    if pi == len(q):
+        return 100
+
+    return 0
+
+
+def _list_files_local(root: str, query: str, limit: int) -> list[str]:
+    """Walk workspace directory, score files against query, return top matches."""
+    base = Path(root)
+    scored: list[tuple[int, str]] = []
+    try:
+        for dirpath, dirnames, filenames in os.walk(base):
+            # Prune ignored and hidden directories in-place
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in _IGNORE_DIRS and not d.startswith(".")
+            ]
+            for fn in filenames:
+                if fn.startswith("."):
+                    continue
+                try:
+                    rel = (Path(dirpath) / fn).relative_to(base).as_posix()
+                except ValueError:
+                    continue
+                sc = _fuzzy_score(rel, query)
+                if sc > 0:
+                    scored.append((sc, rel))
+    except (PermissionError, OSError):
+        pass
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [r for _, r in scored[:limit]]
+
+
+@router.get("/{workspace_id}/files", response_model=List[str])
+async def list_workspace_files(
+    workspace_id: int,
+    query: str = "",
+    limit: int = 8,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return files in a workspace matching *query* (fuzzy, case-insensitive).
+
+    Used by the frontend @mention autocomplete in the prompt textarea.
+    """
+    result = await db.execute(
+        select(Workspace).where(Workspace.workspace_id == workspace_id)
+    )
+    workspace = result.scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    if workspace.workspace_type == WorkspaceType.LOCAL:
+        files = await asyncio.to_thread(
+            _list_files_local, workspace.path, query, limit
+        )
+        return files
+
+    # SSH / SSH_CONTAINER: run find on the remote host
+    ssh_host = workspace.host
+    workspace_path = (workspace.path or "").rstrip("/")
+    if not ssh_host or not workspace_path:
+        return []
+
+    cmd = (
+        f"find '{workspace_path}' -maxdepth 10 "
+        r"\( -name '.git' -o -name 'node_modules' -o -name '__pycache__'"
+        r" -o -name '.next' -o -name 'venv' -o -name '.venv'"
+        r" -o -name 'dist' -o -name 'build' -o -name 'target' \) -prune"
+        " -o -type f -not -name '.*' -print 2>/dev/null | head -2000"
+    )
+    raw = await _run_ssh_command(ssh_host, cmd)
+    if not raw:
+        return []
+
+    scored: list[tuple[int, str]] = []
+    for line in raw.strip().splitlines():
+        full = line.strip()
+        if not full:
+            continue
+        rel = (
+            full[len(workspace_path):].lstrip("/")
+            if full.startswith(workspace_path)
+            else full
+        )
+        sc = _fuzzy_score(rel, query)
+        if sc > 0:
+            scored.append((sc, rel))
+
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [r for _, r in scored[:limit]]

@@ -9,7 +9,7 @@ import { ApiErrorBody, BackendType, TaskStatus, WorkspaceType } from '@/lib/type
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Textarea } from '@/components/ui/textarea';
+import { MentionTextarea } from '@/components/MentionTextarea';
 import { Label } from '@/components/ui/label';
 import LogStream from '@/components/LogStream';
 import { formatDistanceToNow } from 'date-fns';
@@ -575,11 +575,12 @@ export default function TaskDetailPage() {
             </p>
             <div className="space-y-2">
               <Label htmlFor="continue-prompt">New Instructions</Label>
-              <Textarea
+              <MentionTextarea
                 id="continue-prompt"
                 value={continuePrompt}
-                onChange={(e) => setContinuePrompt(e.target.value)}
-                placeholder="Describe what else should be done or corrected..."
+                onChange={setContinuePrompt}
+                workspaceId={task?.workspace_id}
+                placeholder="Describe what else should be done or corrected… (type @ to reference a file)"
                 rows={4}
                 maxLength={MAX_PROMPT_CHARS}
               />
