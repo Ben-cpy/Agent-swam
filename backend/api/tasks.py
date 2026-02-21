@@ -163,8 +163,15 @@ async def retry_task(
     if task.status != TaskStatus.FAILED:
         raise HTTPException(status_code=400, detail="Only failed tasks can be retried")
 
+    previous_run_id = task.run_id
     _set_task_for_requeue(task, task.prompt, task.model)
     task.run_id = None
+    logger.info(
+        "Retry task in-place: task_id=%s status=FAILED->TODO run_id=%s->None worktree_path=%s",
+        task_id,
+        previous_run_id,
+        task.worktree_path,
+    )
 
     await db.commit()
     await db.refresh(task)
@@ -197,7 +204,17 @@ async def continue_task(
             detail="Only TO_BE_REVIEW, DONE or FAILED tasks can be continued"
         )
 
+    previous_status = task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
+    previous_run_id = task.run_id
     _set_task_for_requeue(task, body.prompt, body.model)
+    task.run_id = None
+    logger.info(
+        "Continue task in-place: task_id=%s status=%s->TODO run_id=%s->None worktree_path=%s",
+        task_id,
+        previous_status,
+        previous_run_id,
+        task.worktree_path,
+    )
 
     await db.commit()
     await db.refresh(task)
