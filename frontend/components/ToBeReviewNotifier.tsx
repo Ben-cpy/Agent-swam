@@ -64,9 +64,9 @@ export default function ToBeReviewNotifier() {
 
     const transitionedTasks = tasks.filter((task) => {
       const previousStatus = previousMap.get(task.id);
-      return previousStatus != null &&
-        previousStatus !== TaskStatus.TO_BE_REVIEW &&
-        task.status === TaskStatus.TO_BE_REVIEW;
+      if (task.status !== TaskStatus.TO_BE_REVIEW) return false;
+      if (previousStatus == null) return true;
+      return previousStatus !== TaskStatus.TO_BE_REVIEW;
     });
 
     if (transitionedTasks.length > 0 && 'Notification' in window) {
