@@ -1,4 +1,8 @@
-﻿* **Copilot 任务卡队列修复（396fadd，2026-02-20）**：
+﻿* **Retry 语义加固与回归脚本（2b7cd28，2026-02-21）**：
+  - 问题：用户反馈 FAILED 任务点击 Retry 后仍可能出现“新任务/新 worktree”心智负担，需要进一步加固“原任务原地重试”语义并增加可回归验证。
+  - 解决：后端在 `retry/continue` 两个入口统一清理 `run_id` 并写入 in-place 重排队日志；新增 `tests/test_retry_inplace.py`，验证 retry 后任务数量不增加、`id/title/worktree_path` 不变、状态 `FAILED -> TODO`。
+  - 避免复发：涉及状态机行为（重试/继续）必须配套最小回归脚本，至少覆盖“实体不复制、上下文不丢失、状态可观测”三项断言。
+  - Commit: `2b7cd28`* **Copilot 任务卡队列修复（396fadd，2026-02-20）**：
   - 问题：copilot_cli 任务持续停留在 TODO/Queue，scheduler 周期性告警 “Runner does not support backend copilot_cli”。
   - 解决：LocalRunnerAgent 的 runner capabilities 改为从 BackendType 枚举动态生成，确保包含 copilot_cli；同时给 scheduler 增加“不支持 backend”告警去重，避免每轮刷屏。
   - 避免复发：新增 backend 时统一从单一枚举源派生能力列表，禁止在 runner 注册里写死字符串常量。
@@ -47,3 +51,4 @@
   - 解决：手动合并冲突块，保留双方有效记录后完成 merge commit。
   - 避免复发：并行分支都维护同一沉淀文档时，合并前先 rebase 或提前拆分独立条目，降低冲突概率。
   - Commit: `0747361`
+
