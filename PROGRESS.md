@@ -1,4 +1,9 @@
-﻿* **TO_BE_REVIEW 全局弹窗通知（56a0913，2026-02-21）**：
+﻿* **Review 通知漏报边界修复（1cea57b，2026-02-21）**：
+  - 问题：如果任务在两次轮询之间快速完成，下一次拉取时可能“首次出现即 TO_BE_REVIEW”，原逻辑会因为缺少上一状态而不弹窗。
+  - 解决：在 `frontend/components/ToBeReviewNotifier.tsx` 调整跃迁判断：首次观察到任务且当前为 `TO_BE_REVIEW` 也触发通知。
+  - 避免复发：状态变化提醒逻辑需覆盖“首次观测态”场景，避免仅依赖严格的前后态对比。
+  - Commit: `1cea57b`
+* **TO_BE_REVIEW 全局弹窗通知（56a0913，2026-02-21）**：
   - 问题：任务进入 `TO_BE_REVIEW` 后，只有在看板/详情页内才能看到状态变化，切到其他站内页面时容易错过待审核任务。
   - 解决：新增 `frontend/components/ToBeReviewNotifier.tsx` 全局客户端通知器并挂载到 `frontend/app/layout.tsx`；通过 SWR 轮询任务列表，检测任务状态由非 `TO_BE_REVIEW` 跃迁到 `TO_BE_REVIEW` 时触发浏览器 Notification 弹窗（`silent: true`，点击跳转任务详情）。
   - 避免复发：对关键状态流转（如待审核、失败、人工介入）统一提供跨页面可见提醒，避免仅依赖当前页面局部 UI 提示。
@@ -68,4 +73,5 @@
   - 解决：增强 `backend/core/adapters/cli_resolver.py`：扩展 Git Bash 探测路径（Program Files/LocalAppData/PATH/环境变量）、去重校验并统一优先级；`claude/codex/copilot` 适配器统一注入 `COMSPEC/SHELL` 覆盖，`Claude` 额外注入 `CLAUDE_CODE_SHELL`；`Codex` 额外传入 `shell_environment_policy.set.*` 作为 shell tool 环境提示。
   - 避免复发：Windows shell 选择统一走 `cli_resolver` 单一入口，新增 CLI/适配器时禁止各自硬编码 shell 逻辑；任何变更都先验证当前机型解析顺序输出。
   - Commit: `46b4fa0`
+
 
