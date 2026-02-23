@@ -67,9 +67,18 @@ async def create_task(
     )
 
     db.add(new_task)
+    await db.flush()
+
+    # Refresh with eager-loaded relationship to avoid lazy-loading during serialization
+    task_id = new_task.id
     await db.commit()
 
-    return new_task
+    result = await db.execute(
+        select(Task).options(selectinload(Task.run)).where(Task.id == task_id)
+    )
+    refreshed_task = result.scalar_one_or_none()
+
+    return refreshed_task
 
 
 @router.get("", response_model=List[TaskResponse])
