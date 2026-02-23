@@ -67,7 +67,7 @@ class Task(Base):
     # runs: all runs for this task (one-to-many)
     runs = relationship("Run", back_populates="task", foreign_keys="[Run.task_id]")
     # run: current/latest run (many-to-one via run_id)
-    run = relationship("Run", foreign_keys=[run_id], post_update=True, uselist=False)
+    run = relationship("Run", foreign_keys=[run_id], uselist=False)
 
 
 class Workspace(Base):

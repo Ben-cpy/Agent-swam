@@ -68,7 +68,6 @@ async def create_task(
 
     db.add(new_task)
     await db.commit()
-    await db.refresh(new_task)
 
     return new_task
 
@@ -179,7 +178,6 @@ async def _update_task(
         task.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
-    await db.refresh(task)
 
     return task
 
@@ -230,7 +228,6 @@ async def retry_task(
     )
 
     await db.commit()
-    await db.refresh(task)
 
     return task
 
@@ -273,7 +270,6 @@ async def continue_task(
     )
 
     await db.commit()
-    await db.refresh(task)
 
     return task
 
@@ -331,14 +327,16 @@ async def merge_task(
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if task.worktree_path:
-        await _remove_worktree(task_id, task.worktree_path, workspace)
-
+    # Save worktree path before commit to avoid using detached workspace object
+    worktree_path = task.worktree_path
     task.status = TaskStatus.DONE
     task.worktree_path = None
     task.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    await db.refresh(task)
+
+    # Cleanup worktree after commit using saved values
+    if worktree_path:
+        await _remove_worktree(task_id, worktree_path, workspace)
 
     return task
 
@@ -378,7 +376,6 @@ async def mark_task_done(
     task.worktree_path = None
     task.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    await db.refresh(task)
     logger.info("Task %s marked as DONE manually", task_id)
 
     # Best-effort worktree cleanup (after DB commit so status update is not blocked)
@@ -405,7 +402,7 @@ async def delete_task(
     if task.status == TaskStatus.RUNNING:
         raise HTTPException(status_code=400, detail="Cannot delete a running task. Cancel it first.")
 
-    # Capture worktree info before deletion so we can clean up after
+    # Capture worktree info and workspace BEFORE deletion - don't rely on task relationships after deletion
     worktree_path = task.worktree_path
     workspace: Optional[Workspace] = None
     if worktree_path:
@@ -429,6 +426,7 @@ async def delete_task(
     await db.commit()
 
     # Best-effort worktree cleanup (after DB commit so task deletion is not blocked)
+    # Use saved worktree_path and workspace objects, not task references
     if worktree_path and workspace:
         await _remove_worktree(task_id, worktree_path, workspace)
 
