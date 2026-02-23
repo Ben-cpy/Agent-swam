@@ -1,4 +1,11 @@
-﻿* **Merge 流程健壮性补强（11199d3，2026-02-21）**：
+﻿* **异步 SQLAlchemy 数据库稳定性修复（65c5e4a，2026-02-23）**：
+  - 问题：高并发场景下频繁出现 "Database is locked" 错误与 "detached instance ... is not bound to any database session" 异常，数据库操作不稳定。
+  - 根本原因：①Task.run relationship 的 `post_update=True` 在异步环境中导致额外 UPDATE 和竞态条件；②`expire_on_commit=False` 与 `post_update=True` 组合引发对象分离问题；③三个关键函数（continue_task/merge_task/delete_task）在 commit 后使用可能分离的对象。
+  - 解决：①移除 `post_update=True` 从 models.py 的 Task.run relationship；②改为 `expire_on_commit=True` 以强制正确的对象生命周期管理；③统一 session 使用模式：commit 前保存所有需要的属性值，commit 后仅使用保存的值；④移除所有不必要的 `db.refresh()` 调用（create_task/retry_task/_update_task/continue_task/mark_task_done 共 5 处）；⑤merge_task/delete_task 在 commit 前保存 worktree_path/workspace，commit 后调用 _remove_worktree 时仅使用保存值。
+  - 避免复发：异步 ORM 操作必须遵循"获取所需值→commit→使用保存值"的严格顺序，禁止 commit 后访问任何 ORM 对象属性；新增 session 管理改动时强制 review session 生命周期。
+  - Commit: `65c5e4a`
+
+* **Merge 流程健壮性补强（11199d3，2026-02-21）**：
   - 问题：用户在点击任务 Merge 时仍会遇到高频失败，包括基线 workspace/任务 worktree 存在未提交改动、历史 merge 残留状态阻塞、worktree 路径失效后无法按分支继续合并，以及 AI 冲突兜底仅按退出码判定导致误报失败。
   - 解决：重构 backend/api/tasks.py 合并链路，新增“合并前自动恢复”与“可选 worktree”机制：先自动 merge --abort 清理遗留状态；对 task/workspace 两侧未提交改动自动提交后再 merge；worktree 缺失时允许直接按 task 分支合并；冲突时仅触发一次 AI fallback，并在 AI 后按 Git 实际状态（unmerged files 与 MERGE_HEAD）做最终判定。同步在 backend/core/adapters/codex.py 为非交互执行增加 --ask-for-approval never，避免自动兜底卡在审批提示。新增 tests/test_merge_robust.py 回归场景覆盖基线脏工作区自动提交与无 worktree 路径分支合并。
   - 避免复发：Merge 入口必须遵循“规则优先、AI兜底、状态可恢复”的统一流程，且每次改动都要覆盖真实失败边界（base dirty/worktree missing/stale MERGE_HEAD）并回归验证。
