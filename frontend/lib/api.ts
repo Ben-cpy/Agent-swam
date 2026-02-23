@@ -80,9 +80,15 @@ export const workspaceAPI = {
   create: (data: WorkspaceCreateInput) => apiClient.post<Workspace>('/workspaces', data),
   delete: (id: number) => apiClient.delete(`/workspaces/${id}`),
   resources: (id: number) => apiClient.get<WorkspaceResources>(`/workspaces/${id}/resources`),
-  /** Fuzzy-search files in a workspace for @mention autocomplete. */
-  listFiles: (id: number, query: string, limit = 8) =>
-    apiClient.get<string[]>(`/workspaces/${id}/files`, { params: { query, limit } }),
+  /** Fuzzy-search files in a workspace or task worktree for @mention autocomplete. */
+  listFiles: (id: number, query: string, limit = 8, taskId?: number) =>
+    apiClient.get<string[]>(`/workspaces/${id}/files`, {
+      params: {
+        query,
+        limit,
+        ...(taskId !== undefined ? { task_id: taskId } : {}),
+      },
+    }),
 };
 
 // Usage APIs
