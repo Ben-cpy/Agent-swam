@@ -21,20 +21,18 @@ class CodexAdapter(BackendAdapter):
         """
         Build Codex CLI command.
 
-        Format: codex exec --json --sandbox danger-full-access --cd <workspace>
-                --ask-for-approval never
-                [--model <model>] [--reasoning-effort <effort>] -
+        Format: codex --ask-for-approval never exec --json --sandbox danger-full-access
+                --cd <workspace> [--model <model>] [--reasoning-effort <effort>] -
 
         Prompt content is provided via stdin to avoid command-line length limits.
         """
         cmd = [
             resolve_cli("codex"),
+            "--ask-for-approval", "never",  # Non-interactive backend flow must not wait for approvals
             "exec",
             "--json",  # Output JSONL events
-            "--ask-for-approval", "never",  # Non-interactive backend flow must not wait for approvals
             "--sandbox", "danger-full-access",  # Allow full filesystem access
             "--cd", self.workspace_path,  # Set working directory
-            "--skip-git-repo-check",  # Allow running outside git repo
         ]
         windows_shell_env = build_windows_env_overrides(cli_name="codex")
         for key in ("COMSPEC", "SHELL"):
