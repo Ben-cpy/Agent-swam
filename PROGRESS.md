@@ -122,9 +122,15 @@
   - Commit: `76ef41c`
 
 * **任务审批状态回归修复（22438ec，2026-02-21）**：
-  - 问题：为修复空悬 task 引入的 reconciler 自动闭环逻辑，导致新任务在未审批场景可能被自动从 `TO_BE_REVIEW` 置为 `DONE`，并触发 worktree/分支清理，出现“未合并主干却被关单”的高风险行为。
-  - 解决：移除 `backend/core/task_reconciler.py` 中 `TO_BE_REVIEW -> DONE` 自动状态推进与自动删分支逻辑，只保留失效 worktree 引用清理；新增 `POST /api/tasks/{id}/mark-done` 手动完结接口；前端任务详情页新增 `Mark as Done` 按钮；回归脚本更新为“reconciler 不自动关单”，并新增 `tests/test_mark_done.py`。
-  - 避免复发：reconciler 只能做“引用修复/一致性修复”，不得做审批语义状态推进；任何会把任务置为 `DONE` 的路径必须是显式用户动作（merge 或 mark done），并配套回归测试覆盖。
+  - 问题：为修复空悬 task 引入的 reconciler 自动闭环逻辑，导致新任务在未审批场景可能被自动从 `TO_BE_REVIEW` 置为 `DONE`，并触发 worktree/分支清理，出现”未合并主干却被关单”的高风险行为。
+  - 解决：移除 `backend/core/task_reconciler.py` 中 `TO_BE_REVIEW -> DONE` 自动状态推进与自动删分支逻辑，只保留失效 worktree 引用清理；新增 `POST /api/tasks/{id}/mark-done` 手动完结接口；前端任务详情页新增 `Mark as Done` 按钮；回归脚本更新为”reconciler 不自动关单”，并新增 `tests/test_mark_done.py`。
+  - 避免复发：reconciler 只能做”引用修复/一致性修复”，不得做审批语义状态推进；任何会把任务置为 `DONE` 的路径必须是显式用户动作（merge 或 mark done），并配套回归测试覆盖。
   - Commit: `22438ec`
+
+* **task-7 数据库稳定性修复合并入主分支（4971f1c，2026-02-23）**：
+  - 问题：task-7 worktree 包含 3 个关键数据库稳定性修复提交，需要合并入主分支。
+  - 解决：在主分支执行 `git merge worktree-task-7-db-fixes --no-ff`，包含：异步 SQLAlchemy 稳定性修复、`post_update=True` 移除、session 生命周期正确化、数据库锁定竞态条件修复；同时引入 `DATABASE_FIX_SUMMARY.md` 文档；合并无冲突，生成 merge commit 后清理 worktree。
+  - 避免复发：task worktree 合并前必须验证 `git worktree list`，确认分支名称后执行合并并清理资源。
+  - Commit: `4971f1c`
 
 
