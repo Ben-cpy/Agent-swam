@@ -580,6 +580,7 @@ export default function TaskDetailPage() {
                 value={continuePrompt}
                 onChange={setContinuePrompt}
                 workspaceId={task?.workspace_id}
+                taskId={task?.id}
                 placeholder="Describe what else should be done or corrected… (type @ to reference a file)"
                 rows={4}
                 maxLength={MAX_PROMPT_CHARS}

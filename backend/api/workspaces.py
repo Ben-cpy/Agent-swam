@@ -414,11 +414,13 @@ async def list_workspace_files(
     workspace_id: int,
     query: str = "",
     limit: int = 8,
+    task_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Return files in a workspace matching *query* (fuzzy, case-insensitive).
+    """Return files in a workspace or task worktree matching *query* (fuzzy, case-insensitive).
 
     Used by the frontend @mention autocomplete in the prompt textarea.
+    If task_id is provided, search in the task's worktree instead of the workspace root.
     """
     result = await db.execute(
         select(Workspace).where(Workspace.workspace_id == workspace_id)
@@ -427,20 +429,30 @@ async def list_workspace_files(
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
+    # Determine search path: worktree (if task_id provided) or workspace
+    search_path = workspace.path
+    if task_id is not None:
+        task_result = await db.execute(
+            select(Task).where(Task.id == task_id, Task.workspace_id == workspace_id)
+        )
+        task = task_result.scalar_one_or_none()
+        if task and task.worktree_path:
+            search_path = task.worktree_path
+
     if workspace.workspace_type == WorkspaceType.LOCAL:
         files = await asyncio.to_thread(
-            _list_files_local, workspace.path, query, limit
+            _list_files_local, search_path, query, limit
         )
         return files
 
     # SSH / SSH_CONTAINER: run find on the remote host
     ssh_host = workspace.host
-    workspace_path = (workspace.path or "").rstrip("/")
-    if not ssh_host or not workspace_path:
+    find_path = (search_path or "").rstrip("/")
+    if not ssh_host or not find_path:
         return []
 
     cmd = (
-        f"find '{workspace_path}' -maxdepth 10 "
+        f"find '{find_path}' -maxdepth 10 "
         r"\( -name '.git' -o -name 'node_modules' -o -name '__pycache__'"
         r" -o -name '.next' -o -name 'venv' -o -name '.venv'"
         r" -o -name 'dist' -o -name 'build' -o -name 'target' \) -prune"
@@ -456,8 +468,8 @@ async def list_workspace_files(
         if not full:
             continue
         rel = (
-            full[len(workspace_path):].lstrip("/")
-            if full.startswith(workspace_path)
+            full[len(find_path):].lstrip("/")
+            if full.startswith(find_path)
             else full
         )
         sc = _fuzzy_score(rel, query)

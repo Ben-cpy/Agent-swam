@@ -143,12 +143,15 @@ export interface MentionTextareaProps
   onChange: (value: string) => void;
   /** If provided, file search is enabled against this workspace. */
   workspaceId?: number;
+  /** Optional task ID for searching files in task's worktree instead of workspace root. */
+  taskId?: number;
 }
 
 export function MentionTextarea({
   value,
   onChange,
   workspaceId,
+  taskId,
   className,
   ...rest
 }: MentionTextareaProps) {
@@ -164,7 +167,7 @@ export function MentionTextarea({
     async (query: string, atIndex: number) => {
       if (!workspaceId) return;
       try {
-        const res = await workspaceAPI.listFiles(workspaceId, query);
+        const res = await workspaceAPI.listFiles(workspaceId, query, 8, taskId);
         setMention((prev) => {
           // Guard: discard stale responses if the user moved on
           if (!prev.active || prev.atIndex !== atIndex) return prev;
@@ -174,7 +177,7 @@ export function MentionTextarea({
         // silently ignore network errors
       }
     },
-    [workspaceId],
+    [workspaceId, taskId],
   );
 
   const debouncedFetch = useDebounce(fetchFiles, 180);
