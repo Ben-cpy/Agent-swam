@@ -349,8 +349,7 @@ async def mark_task_done(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Mark a reviewed task as DONE manually.
-    This endpoint never performs merge/cleanup automatically.
+    Mark a reviewed task as DONE manually and clean up its git worktree.
     """
     result = await db.execute(
         select(Task).where(Task.id == task_id)
@@ -366,11 +365,26 @@ async def mark_task_done(
             detail="Only TO_BE_REVIEW tasks can be marked as DONE",
         )
 
+    # Capture worktree info before committing so we can clean up after
+    worktree_path = task.worktree_path
+    workspace: Optional[Workspace] = None
+    if worktree_path:
+        ws_result = await db.execute(
+            select(Workspace).where(Workspace.workspace_id == task.workspace_id)
+        )
+        workspace = ws_result.scalar_one_or_none()
+
     task.status = TaskStatus.DONE
+    task.worktree_path = None
     task.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(task)
     logger.info("Task %s marked as DONE manually", task_id)
+
+    # Best-effort worktree cleanup (after DB commit so status update is not blocked)
+    if worktree_path and workspace:
+        await _remove_worktree(task_id, worktree_path, workspace)
+
     return task
 
 
