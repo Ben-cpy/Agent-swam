@@ -65,12 +65,48 @@ export default function TaskForm({ defaultWorkspaceId, lockedWorkspaceId }: Task
       .then((res) => {
         setWorkspaces(res.data);
         if (res.data.length > 0) {
+          // Try to load draft from localStorage
+          let draft: any = null;
+          if (typeof window !== 'undefined') {
+            try {
+              const saved = localStorage.getItem('taskFormDraft');
+              if (saved) {
+                draft = JSON.parse(saved);
+              }
+            } catch {
+              // Silently ignore parse errors
+            }
+          }
+
           let defaultId: string;
+          let restoredFormData = { ...formData };
+          let restoredCustomPermissionMode = customPermissionMode;
+          let restoredShowCustomPermission = showCustomPermission;
+          let restoredTitleManuallyEdited = titleManuallyEdited;
+
           if (lockedWorkspaceId !== undefined) {
             // Workspace is locked from URL — use it directly
             defaultId = lockedWorkspaceId.toString();
+          } else if (draft) {
+            // Check if draft's workspace_id still exists
+            const draftWorkspaceExists = res.data.some(
+              (w) => w.workspace_id.toString() === draft.workspace_id
+            );
+            defaultId = draftWorkspaceExists ? draft.workspace_id : res.data[0].workspace_id.toString();
+
+            // Restore form data from draft
+            restoredFormData = {
+              title: draft.title || '',
+              prompt: draft.prompt || '',
+              workspace_id: defaultId,
+              backend: draft.backend || BackendType.CLAUDE_CODE,
+              permission_mode: draft.permission_mode || 'bypassPermissions',
+            };
+            restoredCustomPermissionMode = draft.customPermissionMode || '';
+            restoredShowCustomPermission = draft.showCustomPermission || false;
+            restoredTitleManuallyEdited = draft.titleManuallyEdited || false;
           } else {
-            // Priority: URL param > localStorage > first workspace
+            // Priority: URL param > localStorage lastWorkspaceId > first workspace
             const lastId = typeof window !== 'undefined'
               ? localStorage.getItem('lastWorkspaceId')
               : null;
@@ -79,11 +115,19 @@ export default function TaskForm({ defaultWorkspaceId, lockedWorkspaceId }: Task
               ?? res.data[0];
             defaultId = defaultWs.workspace_id.toString();
           }
+
           setFormData((prev) => ({
-            ...prev,
+            ...restoredFormData,
             workspace_id: defaultId,
           }));
-          fetchSuggestedTitle(defaultId);
+          setCustomPermissionMode(restoredCustomPermissionMode);
+          setShowCustomPermission(restoredShowCustomPermission);
+          setTitleManuallyEdited(restoredTitleManuallyEdited);
+
+          // If title was not manually edited in draft, fetch fresh suggested title
+          if (!restoredTitleManuallyEdited) {
+            fetchSuggestedTitle(defaultId);
+          }
         }
       })
       .catch((err) => {
@@ -92,6 +136,23 @@ export default function TaskForm({ defaultWorkspaceId, lockedWorkspaceId }: Task
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Save draft to localStorage on every change
+  useEffect(() => {
+    if (typeof window !== 'undefined' && workspaces.length > 0) {
+      const draft = {
+        title: formData.title,
+        prompt: formData.prompt,
+        workspace_id: formData.workspace_id,
+        backend: formData.backend,
+        permission_mode: formData.permission_mode,
+        customPermissionMode,
+        showCustomPermission,
+        titleManuallyEdited,
+      };
+      localStorage.setItem('taskFormDraft', JSON.stringify(draft));
+    }
+  }, [formData, customPermissionMode, showCustomPermission, titleManuallyEdited, workspaces.length]);
 
   const validate = () => {
     const newErrors = {
@@ -143,6 +204,11 @@ export default function TaskForm({ defaultWorkspaceId, lockedWorkspaceId }: Task
         backend: formData.backend,
         ...(effectivePermissionMode ? { permission_mode: effectivePermissionMode } : {}),
       });
+
+      // Clear draft from localStorage on success
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('taskFormDraft');
+      }
 
       // Redirect to workspace board
       router.push(`/workspaces/${formData.workspace_id}/board`);
