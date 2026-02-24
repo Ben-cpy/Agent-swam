@@ -160,3 +160,9 @@
   - 解决：`backend/database.py` 移除请求级自动 `commit`，改为显式提交策略并在清理阶段安全 rollback/close；为 SQLite 连接启用 `WAL`、`busy_timeout=30000`、`timeout=30`；`backend/api/logs.py` 的 SSE 轮询改为每轮短生命周期 session，避免长连接持有事务。
   - 避免复发：流式接口禁止复用长生命周期 DB session；SQLite 并发场景默认开启 WAL + busy_timeout；事务提交边界统一由写接口显式控制。
   - Commit: `a1aa45f`
+
+* **Runner 心跳时区比较异常修复（20dadee，2026-02-24）**：
+  - 问题：`RunnerHeartbeat._update_heartbeat()` 在比较 `runner.heartbeat_at < threshold` 时抛出 `TypeError: can't compare offset-naive and offset-aware datetimes`，导致心跳循环持续报错。
+  - 解决：在 `backend/core/scheduler.py` 新增 `_normalize_utc()`，统一将 SQLite 读出的 naive datetime 归一化为 UTC aware，再进行离线阈值比较。
+  - 避免复发：凡是从 SQLite 读取并参与时间比较的字段，比较前必须显式做时区归一化，不能假设 ORM 返回值自带 tzinfo。
+  - Commit: `20dadee`
