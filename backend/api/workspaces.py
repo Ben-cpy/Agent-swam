@@ -235,24 +235,25 @@ def _parse_memory_linux(raw: str) -> Optional[MemoryInfo]:
 
 
 def _parse_memory_windows(raw: str) -> Optional[MemoryInfo]:
-    """Parse wmic output (Windows, values in KB)."""
-    values: Dict[str, int] = {}
-    for line in raw.splitlines():
-        line = line.strip()
-        if "=" in line:
-            key, _, val = line.partition("=")
-            try:
-                values[key.strip()] = int(val.strip())
-            except ValueError:
-                pass
-    total_kb = values.get("TotalVisibleMemorySize")
-    free_kb = values.get("FreePhysicalMemory")
-    if total_kb and free_kb:
-        total_mb = total_kb // 1024
-        free_mb = free_kb // 1024
-        used_mb = total_mb - free_mb
-        used_pct = round(used_mb / total_mb * 100, 1) if total_mb > 0 else 0.0
-        return MemoryInfo(total_mb=total_mb, used_mb=used_mb, free_mb=free_mb, used_pct=used_pct)
+    """Parse PowerShell ConvertTo-Json output (Windows, values in KB).
+
+    PowerShell output format (JSON):
+        {"FreePhysicalMemory": 12345, "TotalVisibleMemorySize": 67890}
+    """
+    import json as _json
+    raw = raw.strip()
+    try:
+        obj = _json.loads(raw)
+        total_kb = obj.get("TotalVisibleMemorySize")
+        free_kb = obj.get("FreePhysicalMemory")
+        if total_kb and free_kb:
+            total_mb = int(total_kb) // 1024
+            free_mb = int(free_kb) // 1024
+            used_mb = total_mb - free_mb
+            used_pct = round(used_mb / total_mb * 100, 1) if total_mb > 0 else 0.0
+            return MemoryInfo(total_mb=total_mb, used_mb=used_mb, free_mb=free_mb, used_pct=used_pct)
+    except (ValueError, KeyError, TypeError):
+        pass
     return None
 
 
@@ -293,10 +294,12 @@ async def get_workspace_resources(
         memory: Optional[MemoryInfo] = None
         try:
             if platform.system() == "Windows":
+                # wmic was removed in Windows 11 21H2+; use PowerShell instead
                 rc, out = await _run_local_command([
-                    "wmic", "OS", "get",
-                    "FreePhysicalMemory,TotalVisibleMemorySize",
-                    "/Value", "/format:list",
+                    "powershell", "-NoProfile", "-Command",
+                    "Get-CimInstance Win32_OperatingSystem | "
+                    "Select-Object FreePhysicalMemory,TotalVisibleMemorySize | "
+                    "ConvertTo-Json"
                 ])
                 if rc == 0:
                     memory = _parse_memory_windows(out)

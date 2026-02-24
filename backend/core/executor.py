@@ -14,11 +14,12 @@ from models import ErrorClass, Run, Runner, Task, TaskStatus, Workspace, Workspa
 
 logger = logging.getLogger(__name__)
 
+# Module-level singleton for cancellation signals shared across all TaskExecutor instances
+_cancelled_task_ids: set[int] = set()
+
 
 class TaskExecutor:
     """Executes tasks using the appropriate backend adapter."""
-
-    _cancelled_task_ids: set[int] = set()
 
     def __init__(self, db_session_maker):
         self.db_session_maker = db_session_maker
@@ -392,7 +393,7 @@ class TaskExecutor:
             logger.error("Error executing task %s: %s", task_id, exc, exc_info=True)
             await self._persist_internal_error(task_id, run_id, str(exc))
         finally:
-            self._cancelled_task_ids.discard(task_id)
+            _cancelled_task_ids.discard(task_id)
 
     async def _run_ssh_task(
         self,
@@ -519,7 +520,16 @@ class TaskExecutor:
             logger.error("Error executing SSH task %s: %s", task_id, exc, exc_info=True)
             await self._persist_internal_error(task_id, run_id, str(exc))
         finally:
-            self._cancelled_task_ids.discard(task_id)
+            _cancelled_task_ids.discard(task_id)
+            # Clean up temporary log file on remote host
+            try:
+                await asyncio.create_subprocess_exec(
+                    "ssh", ssh_host, f"rm -f {shlex.quote(log_file)}",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
 
     async def _persist_execution_result(
         self,
@@ -596,7 +606,7 @@ class TaskExecutor:
             await db.commit()
 
     def _is_task_marked_cancelled(self, task_id: int) -> bool:
-        return task_id in self._cancelled_task_ids
+        return task_id in _cancelled_task_ids
 
     async def cancel_task(self, task_id: int, db: Optional[AsyncSession] = None) -> bool:
         if db is None:
@@ -618,7 +628,7 @@ class TaskExecutor:
         task.updated_at = datetime.now(timezone.utc)
 
         if was_running:
-            self._cancelled_task_ids.add(task.id)
+            _cancelled_task_ids.add(task.id)
 
         if task.run_id:
             result = await db.execute(select(Run).where(Run.run_id == task.run_id))

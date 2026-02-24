@@ -14,6 +14,7 @@ interface TaskCardProps {
   task: Task;
   isQueued?: boolean;
   onDeleted?: () => void;
+  onRefreshed?: () => void;
 }
 
 function formatElapsed(seconds: number): string {
@@ -26,7 +27,7 @@ function formatElapsed(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-export default function TaskCard({ task, isQueued = false, onDeleted }: TaskCardProps) {
+export default function TaskCard({ task, isQueued = false, onDeleted, onRefreshed }: TaskCardProps) {
   const [elapsed, setElapsed] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [markingDone, setMarkingDone] = useState(false);
@@ -93,7 +94,7 @@ export default function TaskCard({ task, isQueued = false, onDeleted }: TaskCard
     setMarkingDone(true);
     try {
       await taskAPI.markDone(task.id);
-      onDeleted?.();
+      (onRefreshed ?? onDeleted)?.();
     } catch {
       alert('Failed to mark task as done');
       setMarkingDone(false);
