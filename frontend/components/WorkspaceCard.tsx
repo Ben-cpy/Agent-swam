@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Workspace, TaskStatus, WorkspaceType } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import WorkspaceHealthBadge from '@/components/WorkspaceHealthBadge';
 
 interface WorkspaceCardProps {
   workspace: Workspace;
@@ -24,7 +25,14 @@ export default function WorkspaceCard({ workspace, taskCounts }: WorkspaceCardPr
       <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-base truncate">{workspace.display_name}</CardTitle>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <WorkspaceHealthBadge
+                workspaceId={workspace.workspace_id}
+                workspaceType={workspace.workspace_type}
+                refreshInterval={60000}
+              />
+              <CardTitle className="text-base truncate">{workspace.display_name}</CardTitle>
+            </div>
             <Badge variant="outline" className="text-xs shrink-0">
               {typeLabel[workspace.workspace_type]}
             </Badge>

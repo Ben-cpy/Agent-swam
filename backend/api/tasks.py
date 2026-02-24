@@ -15,6 +15,7 @@ from models import Task, TaskStatus, Workspace, WorkspaceType, Run, BackendType
 from schemas import TaskCreate, TaskResponse, NextTaskNumberResponse, TaskContinueRequest, TaskPatch
 from core.adapters import ClaudeCodeAdapter, CodexAdapter, CopilotAdapter
 from core.executor import TaskExecutor
+from core.ssh_utils import build_ssh_connection_args, extract_remote_path, run_ssh_command
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,49 @@ def _get_task_branch(task_id: int) -> str:
     return f"task-{task_id}"
 
 
+async def _check_workspace_is_git(workspace: Workspace) -> bool:
+    """Return True if the workspace path is a git repository.
+
+    For LOCAL workspaces: synchronous filesystem check.
+    For SSH workspaces: quick SSH command with short timeout.
+    Returns True on timeout so the task can still be created (error surfaces at execution time).
+    """
+    if workspace.workspace_type == WorkspaceType.LOCAL:
+        # Check for .git directory or file (the latter is used in worktrees)
+        return os.path.exists(os.path.join(workspace.path, ".git"))
+
+    if not workspace.host:
+        return False
+
+    ssh_args = build_ssh_connection_args(workspace.host, workspace.port, workspace.ssh_user)
+    remote_path = extract_remote_path(workspace.path, workspace.workspace_type)
+
+    if workspace.workspace_type == WorkspaceType.SSH_CONTAINER:
+        git_cmd = (
+            f"docker exec {shlex.quote(workspace.container_name or '')} "
+            f"git -C {shlex.quote(remote_path)} rev-parse --git-dir 2>/dev/null "
+            f"&& echo GIT_OK || echo NOT_GIT"
+        )
+    else:
+        git_cmd = (
+            f"git -C {shlex.quote(remote_path)} rev-parse --git-dir 2>/dev/null "
+            f"&& echo GIT_OK || echo NOT_GIT"
+        )
+
+    try:
+        result = await run_ssh_command(ssh_args, git_cmd, timeout=10.0)
+        if result is None:
+            # SSH connection failed – allow task creation, executor will catch the error
+            logger.warning(
+                "Git check for workspace %s failed (SSH unreachable); allowing task creation",
+                workspace.workspace_id,
+            )
+            return True
+        return "GIT_OK" in result
+    except Exception:
+        return True  # allow on unexpected error
+
+
 @router.post("", response_model=TaskResponse, status_code=201)
 async def create_task(
     task: TaskCreate,
@@ -79,6 +123,17 @@ async def create_task(
     workspace = workspace_result.scalar_one_or_none()
     if not workspace:
         raise HTTPException(status_code=400, detail="Workspace not found")
+
+    # Validate that the workspace is a git repository (required for worktree isolation)
+    if not await _check_workspace_is_git(workspace):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This workspace is not a git repository. "
+                "Tasks use git worktrees for isolation and require a git repo. "
+                "Run `git init` in the workspace directory first."
+            ),
+        )
 
     new_task = Task(
         title=task.title,

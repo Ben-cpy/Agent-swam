@@ -1,3 +1,8 @@
+import asyncio
+import os
+import platform
+import shlex
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -5,11 +10,16 @@ from typing import Dict, List, Optional
 from pathlib import Path
 from database import get_db
 from core.settings_service import get_workspace_max_parallel
+from core.ssh_utils import build_ssh_connection_args, extract_remote_path, run_ssh_command
 from models import Workspace, Runner, WorkspaceType, Task, TaskStatus, Run
-from schemas import WorkspaceCreate, WorkspaceResponse, WorkspaceResourcesResponse, GpuInfo, MemoryInfo
-import asyncio
-import os
-import platform
+from schemas import (
+    WorkspaceCreate,
+    WorkspaceResponse,
+    WorkspaceResourcesResponse,
+    WorkspaceHealthResponse,
+    GpuInfo,
+    MemoryInfo,
+)
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
@@ -170,6 +180,90 @@ async def delete_workspace(
     await db.commit()
 
 
+# ---------------------------------------------------------------------------
+# Health check endpoint
+# ---------------------------------------------------------------------------
+
+@router.get("/{workspace_id}/health", response_model=WorkspaceHealthResponse)
+async def get_workspace_health(
+    workspace_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Check if a workspace is reachable and is a git repository."""
+    result = await db.execute(select(Workspace).where(Workspace.workspace_id == workspace_id))
+    workspace = result.scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    if workspace.workspace_type == WorkspaceType.LOCAL:
+        if not os.path.exists(workspace.path):
+            return WorkspaceHealthResponse(reachable=False, is_git=False, message="Path not found")
+        is_git = os.path.exists(os.path.join(workspace.path, ".git"))
+        msg = "OK" if is_git else "Not a git repository"
+        return WorkspaceHealthResponse(reachable=True, is_git=is_git, message=msg)
+
+    # SSH / SSH_CONTAINER
+    ssh_host = workspace.host
+    if not ssh_host:
+        return WorkspaceHealthResponse(reachable=False, is_git=False, message="No host configured")
+
+    ssh_args = build_ssh_connection_args(ssh_host, workspace.port, workspace.ssh_user)
+    remote_path = extract_remote_path(workspace.path, workspace.workspace_type)
+
+    # Test basic SSH connectivity
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ssh", *ssh_args, "echo ok",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=10)
+        if proc.returncode != 0:
+            err = stderr_bytes.decode(errors="replace").strip()
+            return WorkspaceHealthResponse(reachable=False, is_git=False, message=f"SSH failed: {err[:80]}")
+    except asyncio.TimeoutError:
+        return WorkspaceHealthResponse(reachable=False, is_git=False, message="SSH connection timeout")
+    except Exception as exc:
+        return WorkspaceHealthResponse(reachable=False, is_git=False, message=f"SSH error: {str(exc)[:80]}")
+
+    # For SSH_CONTAINER, also check that the container is accessible
+    container_name = workspace.container_name
+    if workspace.workspace_type == WorkspaceType.SSH_CONTAINER:
+        container_check = await run_ssh_command(
+            ssh_args,
+            f"docker inspect --format={{{{.State.Running}}}} {shlex.quote(container_name or '')} 2>/dev/null",
+            timeout=10.0,
+        )
+        if not container_check or container_check.strip() != "true":
+            return WorkspaceHealthResponse(
+                reachable=True,
+                is_git=False,
+                message=f"Container '{container_name}' is not running",
+            )
+
+    # Check if remote path is a git repository
+    if workspace.workspace_type == WorkspaceType.SSH_CONTAINER:
+        git_check_cmd = (
+            f"docker exec {shlex.quote(container_name or '')} "
+            f"git -C {shlex.quote(remote_path)} rev-parse --git-dir 2>/dev/null "
+            f"&& echo GIT_OK || echo NOT_GIT"
+        )
+    else:
+        git_check_cmd = (
+            f"git -C {shlex.quote(remote_path)} rev-parse --git-dir 2>/dev/null "
+            f"&& echo GIT_OK || echo NOT_GIT"
+        )
+
+    git_result = await run_ssh_command(ssh_args, git_check_cmd, timeout=10.0)
+    is_git = bool(git_result and "GIT_OK" in git_result)
+    msg = "OK" if is_git else "Not a git repository"
+    return WorkspaceHealthResponse(reachable=True, is_git=is_git, message=msg)
+
+
+# ---------------------------------------------------------------------------
+# Resource monitoring
+# ---------------------------------------------------------------------------
+
 async def _run_local_command(args: list[str]) -> tuple[int, str]:
     """Run a local subprocess and return (returncode, stdout)."""
     proc = await asyncio.create_subprocess_exec(
@@ -179,23 +273,6 @@ async def _run_local_command(args: list[str]) -> tuple[int, str]:
     )
     stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
     return proc.returncode, stdout.decode(errors="replace")
-
-
-async def _run_ssh_command(ssh_host: str, cmd: str) -> Optional[str]:
-    """Run a command on a remote SSH host, returning stdout or None on failure."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "ssh", ssh_host, f"{cmd} 2>/dev/null || echo UNAVAILABLE",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-        text = stdout.decode(errors="replace").strip()
-        if text == "UNAVAILABLE" or proc.returncode != 0:
-            return None
-        return text
-    except Exception:
-        return None
 
 
 def _parse_gpu_output(raw: str) -> Optional[List[GpuInfo]]:
@@ -235,11 +312,7 @@ def _parse_memory_linux(raw: str) -> Optional[MemoryInfo]:
 
 
 def _parse_memory_windows(raw: str) -> Optional[MemoryInfo]:
-    """Parse PowerShell ConvertTo-Json output (Windows, values in KB).
-
-    PowerShell output format (JSON):
-        {"FreePhysicalMemory": 12345, "TotalVisibleMemorySize": 67890}
-    """
+    """Parse PowerShell ConvertTo-Json output (Windows, values in KB)."""
     import json as _json
     raw = raw.strip()
     try:
@@ -279,7 +352,6 @@ async def get_workspace_resources(
 
     if not is_ssh:
         # --- LOCAL ---
-        # GPU
         gpu: Optional[List[GpuInfo]] = None
         gpu_available = False
         try:
@@ -290,11 +362,9 @@ async def get_workspace_resources(
         except (FileNotFoundError, asyncio.TimeoutError, OSError):
             gpu_available = False
 
-        # Memory
         memory: Optional[MemoryInfo] = None
         try:
             if platform.system() == "Windows":
-                # wmic was removed in Windows 11 21H2+; use PowerShell instead
                 rc, out = await _run_local_command([
                     "powershell", "-NoProfile", "-Command",
                     "Get-CimInstance Win32_OperatingSystem | "
@@ -317,18 +387,20 @@ async def get_workspace_resources(
     if not ssh_host:
         return WorkspaceResourcesResponse(gpu=None, gpu_available=False, memory=None)
 
+    ssh_args = build_ssh_connection_args(ssh_host, workspace.port, workspace.ssh_user)
+
     # GPU via SSH
     gpu = None
     gpu_available = False
     nvidia_cmd = " ".join(NVIDIA_SMI_ARGS)
-    gpu_raw = await _run_ssh_command(ssh_host, nvidia_cmd)
+    gpu_raw = await run_ssh_command(ssh_args, nvidia_cmd, timeout=10.0)
     if gpu_raw:
         gpu = _parse_gpu_output(gpu_raw)
         gpu_available = gpu is not None
 
     # Memory via SSH (assume Linux remote)
     memory = None
-    mem_raw = await _run_ssh_command(ssh_host, "free -m")
+    mem_raw = await run_ssh_command(ssh_args, "free -m", timeout=10.0)
     if mem_raw:
         memory = _parse_memory_linux(mem_raw)
 
@@ -366,7 +438,7 @@ def _fuzzy_score(rel_path: str, query: str) -> int:
     if q in path_lc:
         return 500
 
-    # Subsequence match in basename (e.g. "tsf" → "TaskForm")
+    # Subsequence match in basename
     pi = 0
     for ch in basename:
         if pi < len(q) and ch == q[pi]:
@@ -391,7 +463,6 @@ def _list_files_local(root: str, query: str, limit: int) -> list[str]:
     scored: list[tuple[int, str]] = []
     try:
         for dirpath, dirnames, filenames in os.walk(base):
-            # Prune ignored and hidden directories in-place
             dirnames[:] = [
                 d for d in dirnames
                 if d not in _IGNORE_DIRS and not d.startswith(".")
@@ -420,11 +491,7 @@ async def list_workspace_files(
     task_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Return files in a workspace or task worktree matching *query* (fuzzy, case-insensitive).
-
-    Used by the frontend @mention autocomplete in the prompt textarea.
-    If task_id is provided, search in the task's worktree instead of the workspace root.
-    """
+    """Return files in a workspace or task worktree matching *query* (fuzzy, case-insensitive)."""
     result = await db.execute(
         select(Workspace).where(Workspace.workspace_id == workspace_id)
     )
@@ -450,8 +517,13 @@ async def list_workspace_files(
 
     # SSH / SSH_CONTAINER: run find on the remote host
     ssh_host = workspace.host
-    find_path = (search_path or "").rstrip("/")
-    if not ssh_host or not find_path:
+    if not ssh_host:
+        return []
+
+    ssh_args = build_ssh_connection_args(ssh_host, workspace.port, workspace.ssh_user)
+    remote_path = extract_remote_path(search_path, workspace.workspace_type)
+    find_path = remote_path.rstrip("/")
+    if not find_path:
         return []
 
     cmd = (
@@ -461,7 +533,7 @@ async def list_workspace_files(
         r" -o -name 'dist' -o -name 'build' -o -name 'target' \) -prune"
         " -o -type f -not -name '.*' -print 2>/dev/null | head -2000"
     )
-    raw = await _run_ssh_command(ssh_host, cmd)
+    raw = await run_ssh_command(ssh_args, cmd, timeout=15.0)
     if not raw:
         return []
 

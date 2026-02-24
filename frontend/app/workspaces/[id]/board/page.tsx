@@ -5,6 +5,7 @@ import useSWR from 'swr';
 import { taskAPI, workspaceAPI } from '@/lib/api';
 import TaskBoard from '@/components/TaskBoard';
 import WorkspaceResources from '@/components/WorkspaceResources';
+import WorkspaceHealthBadge from '@/components/WorkspaceHealthBadge';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -57,7 +58,14 @@ export default function WorkspaceBoardPage() {
               Workspaces
             </button>
             <span>/</span>
-            <span className="text-foreground font-medium">
+            <span className="flex items-center gap-1.5 text-foreground font-medium">
+              {workspace && (
+                <WorkspaceHealthBadge
+                  workspaceId={workspace.workspace_id}
+                  workspaceType={workspace.workspace_type}
+                  refreshInterval={30000}
+                />
+              )}
               {workspace?.display_name ?? `Workspace ${workspaceId}`}
             </span>
             {workspace && (

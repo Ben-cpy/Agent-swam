@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.adapters import ClaudeCodeAdapter, CodexAdapter, CopilotAdapter
+from core.ssh_utils import build_ssh_connection_args, extract_remote_path, run_ssh_command
 from models import ErrorClass, Run, Runner, Task, TaskStatus, Workspace, WorkspaceType
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,91 @@ class TaskExecutor:
         )
         return worktree_path
 
+    # ------------------------------------------------------------------
+    # Remote worktree helpers for SSH workspaces
+    # ------------------------------------------------------------------
+
+    async def _detect_remote_branch(
+        self,
+        ssh_args: list[str],
+        remote_path: str,
+        workspace_type: WorkspaceType,
+        container_name: Optional[str],
+    ) -> str:
+        """Detect current git branch on the remote host."""
+        if workspace_type == WorkspaceType.SSH_CONTAINER:
+            cmd = f"docker exec -w {shlex.quote(remote_path)} {shlex.quote(container_name or '')} git rev-parse --abbrev-ref HEAD"
+        else:
+            cmd = f"git -C {shlex.quote(remote_path)} rev-parse --abbrev-ref HEAD"
+        result = await run_ssh_command(ssh_args, cmd, timeout=15.0)
+        return result or "main"
+
+    async def _create_remote_worktree(
+        self,
+        ssh_args: list[str],
+        task_id: int,
+        remote_path: str,
+        base_branch: str,
+        workspace_type: WorkspaceType,
+        container_name: Optional[str],
+    ) -> str:
+        """Create (or reuse) a git worktree on the remote host. Returns the remote worktree path."""
+        worktree_branch = f"task-{task_id}"
+        worktree_remote_path = f"{remote_path}-task-{task_id}"
+
+        # Helper to build docker-wrapped or plain git commands
+        def git_cmd(subcmd: str) -> str:
+            if workspace_type == WorkspaceType.SSH_CONTAINER:
+                return f"docker exec {shlex.quote(container_name or '')} git -C {shlex.quote(remote_path)} {subcmd}"
+            return f"git -C {shlex.quote(remote_path)} {subcmd}"
+
+        # Check if the worktree already exists (has a .git marker)
+        if workspace_type == WorkspaceType.SSH_CONTAINER:
+            wt_exists_cmd = (
+                f"docker exec {shlex.quote(container_name or '')} "
+                f"test -e {shlex.quote(worktree_remote_path + '/.git')} && echo EXISTS || echo NOT"
+            )
+        else:
+            wt_exists_cmd = f"test -e {shlex.quote(worktree_remote_path + '/.git')} && echo EXISTS || echo NOT"
+
+        wt_check = await run_ssh_command(ssh_args, wt_exists_cmd, timeout=10.0)
+        if wt_check and "EXISTS" in wt_check:
+            logger.info("Remote worktree at %s already exists, reusing for task %s", worktree_remote_path, task_id)
+            return worktree_remote_path
+
+        # Check if the branch already exists
+        branch_check = await run_ssh_command(
+            ssh_args,
+            git_cmd(f"rev-parse --verify {shlex.quote(worktree_branch)}"),
+            timeout=10.0,
+        )
+        branch_exists = branch_check is not None
+
+        if branch_exists:
+            add_subcmd = f"worktree add {shlex.quote(worktree_remote_path)} {shlex.quote(worktree_branch)}"
+        else:
+            add_subcmd = (
+                f"worktree add -b {shlex.quote(worktree_branch)} "
+                f"{shlex.quote(worktree_remote_path)} {shlex.quote(base_branch)}"
+            )
+
+        proc = await asyncio.create_subprocess_exec(
+            "ssh", *ssh_args, git_cmd(add_subcmd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        if proc.returncode != 0:
+            err = stderr.decode(errors="replace").strip()
+            raise RuntimeError(f"Failed to create remote worktree: {err}")
+
+        logger.info("Created remote worktree for task %s at %s", task_id, worktree_remote_path)
+        return worktree_remote_path
+
+    # ------------------------------------------------------------------
+    # Main execution entry points
+    # ------------------------------------------------------------------
+
     async def execute_task(self, task_id: int, db: Optional[AsyncSession] = None) -> bool:
         if db is None:
             async with self.db_session_maker() as session:
@@ -185,59 +271,120 @@ class TaskExecutor:
             return False
 
         if is_ssh_workspace:
-            # SSH workspace: run task in a tmux session on the remote host
-            ssh_host = workspace.host
-            if not ssh_host:
-                task.status = TaskStatus.FAILED
-                task.updated_at = datetime.now(timezone.utc)
-                await db.commit()
-                logger.error("SSH workspace %s has no host configured", workspace.workspace_id)
-                return False
-
-            tmux_session_name = f"aitask-{task_id}"
-            run = Run(
-                task_id=task.id,
-                runner_id=runner.runner_id,
-                backend=task.backend.value,
-                started_at=datetime.now(timezone.utc),
-                tmux_session=tmux_session_name,
-            )
-            db.add(run)
-            await db.flush()
-
-            task.status = TaskStatus.RUNNING
-            task.run_id = run.run_id
-            task.updated_at = datetime.now(timezone.utc)
-            run_id = run.run_id
-            backend_value = task.backend.value
-            prompt_text = task.prompt
-            permission_mode = task.permission_mode
-            workspace_path = workspace.path
-            task_pk = task.id
-            await db.commit()
-
-            logger.info(
-                "Starting SSH task %s on host %s in tmux session %s",
-                task_id,
-                ssh_host,
-                tmux_session_name,
-            )
-
-            asyncio.create_task(
-                self._run_ssh_task(
-                    task_id=task_pk,
-                    run_id=run_id,
-                    ssh_host=ssh_host,
-                    workspace_path=workspace_path,
-                    backend=backend_value,
-                    prompt=prompt_text,
-                    tmux_session=tmux_session_name,
-                    permission_mode=permission_mode,
-                )
-            )
-            return True
+            return await self._start_ssh_task(task, workspace, runner, db)
 
         # Local workspace: detect branch and create worktree
+        return await self._start_local_task(task, workspace, runner, db)
+
+    async def _start_ssh_task(self, task: Task, workspace: Workspace, runner: Runner, db: AsyncSession) -> bool:
+        """Prepare and launch an SSH workspace task."""
+        task_id = task.id
+        ssh_host = workspace.host
+        if not ssh_host:
+            task.status = TaskStatus.FAILED
+            task.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+            logger.error("SSH workspace %s has no host configured", workspace.workspace_id)
+            return False
+
+        ssh_port = workspace.port
+        ssh_user = workspace.ssh_user
+        container_name = workspace.container_name
+        workspace_type = workspace.workspace_type
+
+        ssh_args = build_ssh_connection_args(ssh_host, ssh_port, ssh_user)
+        remote_path = extract_remote_path(workspace.path, workspace_type)
+
+        # Detect base branch on remote
+        if not task.branch_name:
+            try:
+                base_branch = await self._detect_remote_branch(
+                    ssh_args, remote_path, workspace_type, container_name
+                )
+                task.branch_name = base_branch
+                logger.info("Auto-detected remote base branch '%s' for task %s", base_branch, task_id)
+            except Exception as exc:
+                task.branch_name = "main"
+                logger.warning("Failed to detect remote branch for task %s, fallback to 'main': %s", task_id, exc)
+            task.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+
+        base_branch = task.branch_name or "main"
+
+        # Create git worktree on the remote host
+        try:
+            worktree_remote_path = await self._create_remote_worktree(
+                ssh_args=ssh_args,
+                task_id=task_id,
+                remote_path=remote_path,
+                base_branch=base_branch,
+                workspace_type=workspace_type,
+                container_name=container_name,
+            )
+            if task.worktree_path != worktree_remote_path:
+                task.worktree_path = worktree_remote_path
+                task.updated_at = datetime.now(timezone.utc)
+                await db.commit()
+        except Exception as exc:
+            task.status = TaskStatus.FAILED
+            task.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+            logger.error("Task %s failed: could not create remote worktree: %s", task_id, exc)
+            return False
+
+        tmux_session_name = f"aitask-{task_id}"
+        run = Run(
+            task_id=task.id,
+            runner_id=runner.runner_id,
+            backend=task.backend.value,
+            started_at=datetime.now(timezone.utc),
+            tmux_session=tmux_session_name,
+        )
+        db.add(run)
+        await db.flush()
+
+        task.status = TaskStatus.RUNNING
+        task.run_id = run.run_id
+        task.updated_at = datetime.now(timezone.utc)
+        run_id = run.run_id
+        backend_value = task.backend.value
+        prompt_text = task.prompt
+        permission_mode = task.permission_mode
+        worktree_remote_path = task.worktree_path or remote_path
+        task_pk = task.id
+        await db.commit()
+
+        logger.info(
+            "Starting SSH task %s on host %s (port=%s) in tmux session %s, worktree=%s",
+            task_id,
+            ssh_host,
+            ssh_port,
+            tmux_session_name,
+            worktree_remote_path,
+        )
+
+        asyncio.create_task(
+            self._run_ssh_task(
+                task_id=task_pk,
+                run_id=run_id,
+                ssh_host=ssh_host,
+                ssh_port=ssh_port,
+                ssh_user=ssh_user,
+                container_name=container_name,
+                workspace_type=workspace_type,
+                remote_path=worktree_remote_path,
+                backend=backend_value,
+                prompt=prompt_text,
+                tmux_session=tmux_session_name,
+                permission_mode=permission_mode,
+            )
+        )
+        return True
+
+    async def _start_local_task(self, task: Task, workspace: Workspace, runner: Runner, db: AsyncSession) -> bool:
+        """Prepare and launch a local workspace task."""
+        task_id = task.id
+
         if not task.branch_name:
             try:
                 task.branch_name = await self._detect_current_branch(workspace.path)
@@ -367,7 +514,6 @@ class TaskExecutor:
                     except Exception:
                         pass
 
-                # Flush logs to DB every 2 seconds so the SSE endpoint can stream them in real time
                 now = asyncio.get_event_loop().time()
                 if now - last_flush_time >= 2.0:
                     await _flush_logs_to_db()
@@ -400,16 +546,26 @@ class TaskExecutor:
         task_id: int,
         run_id: int,
         ssh_host: str,
-        workspace_path: str,
+        ssh_port: Optional[int],
+        ssh_user: Optional[str],
+        container_name: Optional[str],
+        workspace_type: WorkspaceType,
+        remote_path: str,
         backend: str,
         prompt: str,
         tmux_session: str,
         permission_mode: Optional[str] = None,
     ):
-        """Run a task on a remote SSH host using tmux for session persistence."""
+        """Run a task on a remote SSH host using tmux for session persistence.
+
+        - remote_path: the actual remote worktree directory to execute in.
+        - For SSH_CONTAINER workspaces, commands are wrapped with docker exec.
+        """
         try:
             log_file = f"/tmp/{tmux_session}.log"
+            ssh_args = build_ssh_connection_args(ssh_host, ssh_port, ssh_user)
 
+            # Build the AI CLI command (backend-specific)
             if backend == "claude_code":
                 if not permission_mode or permission_mode == "bypassPermissions":
                     perm_flag = "--dangerously-skip-permissions"
@@ -423,17 +579,25 @@ class TaskExecutor:
             else:
                 raise ValueError(f"Unknown backend: {backend}")
 
+            # Wrap command with correct execution context (cd for SSH, docker exec for container)
+            if workspace_type == WorkspaceType.SSH_CONTAINER:
+                exec_cmd = (
+                    f"docker exec -w {shlex.quote(remote_path)} "
+                    f"{shlex.quote(container_name or '')} bash -c {shlex.quote(cli_cmd)}"
+                )
+            else:
+                exec_cmd = f"cd {shlex.quote(remote_path)} && {cli_cmd}"
+
             # Build the tmux command: create a new session running the CLI, piping output to a log file
-            # The session is kept alive after the command finishes (tmux default behavior)
             tmux_cmd = (
                 f"tmux new-session -d -s {shlex.quote(tmux_session)} "
-                f"'({cli_cmd}) 2>&1 | tee {shlex.quote(log_file)}; "
+                f"'({exec_cmd}) 2>&1 | tee {shlex.quote(log_file)}; "
                 f"echo EXIT_CODE:$? >> {shlex.quote(log_file)}'"
             )
 
             # Launch the tmux session on the remote host
             launch_proc = await asyncio.create_subprocess_exec(
-                "ssh", ssh_host, tmux_cmd,
+                "ssh", *ssh_args, tmux_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -442,11 +606,11 @@ class TaskExecutor:
                 err_msg = stderr.decode(errors="replace").strip()
                 raise RuntimeError(f"Failed to start SSH tmux session: {err_msg}")
 
-            logger.info("SSH tmux session %s started on %s", tmux_session, ssh_host)
+            logger.info("SSH tmux session %s started on %s:%s", tmux_session, ssh_host, ssh_port)
 
             # Stream the log file from the remote host via tail -f
             tail_proc = await asyncio.create_subprocess_exec(
-                "ssh", ssh_host, f"tail -f {shlex.quote(log_file)}",
+                "ssh", *ssh_args, f"tail -f {shlex.quote(log_file)}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -482,7 +646,7 @@ class TaskExecutor:
                     tail_proc.terminate()
                     # Kill tmux session on remote
                     await asyncio.create_subprocess_exec(
-                        "ssh", ssh_host,
+                        "ssh", *ssh_args,
                         f"tmux kill-session -t {shlex.quote(tmux_session)} 2>/dev/null || true",
                     )
                     break
@@ -495,7 +659,6 @@ class TaskExecutor:
                     tail_proc.terminate()
                     break
 
-                # Flush logs to DB every 2 seconds so the SSE endpoint can stream them in real time
                 now = asyncio.get_event_loop().time()
                 if now - last_flush_time >= 2.0:
                     await _flush_ssh_logs_to_db()
@@ -523,8 +686,9 @@ class TaskExecutor:
             _cancelled_task_ids.discard(task_id)
             # Clean up temporary log file on remote host
             try:
+                ssh_args = build_ssh_connection_args(ssh_host, ssh_port, ssh_user)
                 await asyncio.create_subprocess_exec(
-                    "ssh", ssh_host, f"rm -f {shlex.quote(log_file)}",
+                    "ssh", *ssh_args, f"rm -f {shlex.quote(log_file)}",
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
@@ -560,9 +724,6 @@ class TaskExecutor:
                 run.exit_code = 130
                 run.error_class = ErrorClass.UNKNOWN
                 task.status = TaskStatus.FAILED
-            # Quota classification is meaningful only on failed executions.
-            # Some adapters can emit benign text containing quota-like tokens
-            # (e.g., code identifiers), so do not override a successful run.
             elif is_quota_error and not success:
                 run.exit_code = exit_code
                 run.error_class = ErrorClass.QUOTA

@@ -12,6 +12,7 @@ import {
   UsageStats,
   Workspace,
   WorkspaceCreateInput,
+  WorkspaceHealth,
   WorkspaceResources,
 } from './types';
 
@@ -80,6 +81,7 @@ export const workspaceAPI = {
   create: (data: WorkspaceCreateInput) => apiClient.post<Workspace>('/workspaces', data),
   delete: (id: number) => apiClient.delete(`/workspaces/${id}`),
   resources: (id: number) => apiClient.get<WorkspaceResources>(`/workspaces/${id}/resources`),
+  health: (id: number) => apiClient.get<WorkspaceHealth>(`/workspaces/${id}/health`),
   /** Fuzzy-search files in a workspace or task worktree for @mention autocomplete. */
   listFiles: (id: number, query: string, limit = 8, taskId?: number) =>
     apiClient.get<string[]>(`/workspaces/${id}/files`, {

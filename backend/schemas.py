@@ -186,3 +186,9 @@ class AppSettingsResponse(BaseModel):
 
 class AppSettingsUpdate(BaseModel):
     workspace_max_parallel: int = Field(..., ge=1, le=20)
+
+
+class WorkspaceHealthResponse(BaseModel):
+    reachable: bool
+    is_git: bool
+    message: str

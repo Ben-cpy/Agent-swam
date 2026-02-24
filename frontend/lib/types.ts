@@ -163,3 +163,9 @@ export interface AppSettings {
 export interface AppSettingsUpdateInput {
   workspace_max_parallel: number;
 }
+
+export interface WorkspaceHealth {
+  reachable: boolean;
+  is_git: boolean;
+  message: string;
+}
