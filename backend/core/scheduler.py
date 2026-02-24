@@ -11,6 +11,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _normalize_utc(dt: datetime | None) -> datetime:
+    """Normalize sqlite-returned datetimes to timezone-aware UTC."""
+    if dt is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 class TaskScheduler:
     """
     Task scheduler that periodically checks for TODO tasks and dispatches them to executors.
@@ -244,7 +253,8 @@ class RunnerHeartbeat:
             threshold = datetime.now(timezone.utc) - timedelta(seconds=settings.heartbeat_interval * 2)
             for runner in runners:
                 # Check offline BEFORE updating heartbeat_at (only local runner gets updated)
-                if runner.heartbeat_at < threshold:
+                last_heartbeat_at = _normalize_utc(runner.heartbeat_at)
+                if last_heartbeat_at < threshold:
                     runner.status = RunnerStatus.OFFLINE
                 else:
                     runner.status = RunnerStatus.ONLINE
