@@ -241,14 +241,15 @@ class RunnerHeartbeat:
             result = await db.execute(select(Runner))
             runners = result.scalars().all()
 
+            threshold = datetime.now(timezone.utc) - timedelta(seconds=settings.heartbeat_interval * 2)
             for runner in runners:
-                runner.heartbeat_at = datetime.now(timezone.utc)
-
-                # Check if runner is offline (no heartbeat in 2x interval)
-                threshold = datetime.now(timezone.utc) - timedelta(seconds=settings.heartbeat_interval * 2)
+                # Check offline BEFORE updating heartbeat_at (only local runner gets updated)
                 if runner.heartbeat_at < threshold:
                     runner.status = RunnerStatus.OFFLINE
                 else:
                     runner.status = RunnerStatus.ONLINE
+                # Only refresh heartbeat for the local runner (remote runners update themselves)
+                if runner.env == settings.runner_env:
+                    runner.heartbeat_at = datetime.now(timezone.utc)
 
             await db.commit()

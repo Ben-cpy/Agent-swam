@@ -578,10 +578,7 @@ export default function LogStream({
       try {
         const data = JSON.parse(e.data);
         if (data.content) {
-          const isCopilot = backend === 'copilot_cli';
-          const entries = isCopilot
-            ? parseCopilotLine(data.content)
-            : parseLine(data.content);
+          const entries = processRawLogs(data.content, backend);
           if (entries.length) {
             setLogs((prev) => [...prev, ...entries]);
           }

@@ -1,4 +1,14 @@
-﻿* **异步 SQLAlchemy 数据库稳定性修复（65c5e4a，2026-02-23）**：
+﻿* **7个Bug批量修复（待commit，2026-02-24）**：
+  - Bug1(P0): scheduler.py `_update_heartbeat` 先更新 `heartbeat_at` 再判断阈值，永远不会将 Runner 标记 OFFLINE。修复：阈值判断移到更新之前，且只更新本地 runner 的心跳（按 `settings.runner_env` 过滤）。
+  - Bug2(P0): LogStream.tsx SSE 事件 `data.content` 为多行文本时，原 `parseLine/parseCopilotLine` 只处理单行，改为 `processRawLogs(data.content, backend)` 逐行切割解析。
+  - Bug3(P1): workspaces.py Windows 11 21H2+ 已移除 `wmic`，改用 `PowerShell Get-CimInstance Win32_OperatingSystem | ConvertTo-Json`，同步更新 `_parse_memory_windows` 解析 JSON 格式。
+  - Bug4(P1): executor.py `_cancelled_task_ids` 为类变量存在设计缺陷，改为模块级单例 `set`（保留跨实例通讯语义，消除类变量滥用）。
+  - Bug5(P2): executor.py SSH 任务结束后 `finally` 块增加 `ssh host rm -f /tmp/{tmux_session}.log` 清理临时日志。
+  - Bug6(P3): tasks.py `next_number` 由 `COUNT(*)` 改为 `MAX(id)+1`，避免删除任务后建议标题重复。
+  - Bug7(P3): TaskCard.tsx 新增 `onRefreshed` prop，`handleMarkDone` 改用 `onRefreshed ?? onDeleted`，语义正确，向后兼容。
+  - 运行 `commit.sh` 完成提交。
+
+* **异步 SQLAlchemy 数据库稳定性修复（65c5e4a，2026-02-23）**：
   - 问题：高并发场景下频繁出现 "Database is locked" 错误与 "detached instance ... is not bound to any database session" 异常，数据库操作不稳定。
   - 根本原因：①Task.run relationship 的 `post_update=True` 在异步环境中导致额外 UPDATE 和竞态条件；②`expire_on_commit=False` 与 `post_update=True` 组合引发对象分离问题；③三个关键函数（continue_task/merge_task/delete_task）在 commit 后使用可能分离的对象。
   - 解决：①移除 `post_update=True` 从 models.py 的 Task.run relationship；②改为 `expire_on_commit=True` 以强制正确的对象生命周期管理；③统一 session 使用模式：commit 前保存所有需要的属性值，commit 后仅使用保存的值；④移除所有不必要的 `db.refresh()` 调用（create_task/retry_task/_update_task/continue_task/mark_task_done 共 5 处）；⑤merge_task/delete_task 在 commit 前保存 worktree_path/workspace，commit 后调用 _remove_worktree 时仅使用保存值。
