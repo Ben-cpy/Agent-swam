@@ -20,7 +20,9 @@ if settings.database_url.startswith("sqlite"):
 async_session_maker = sessionmaker(
     engine,
     class_=AsyncSession,
-    expire_on_commit=True
+    # Keep ORM attributes available after commit for FastAPI serialization
+    # and post-commit cleanup paths (avoids async MissingGreenlet regressions).
+    expire_on_commit=False
 )
 
 

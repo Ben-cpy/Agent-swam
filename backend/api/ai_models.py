@@ -9,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter
+from core.adapters.cli_resolver import resolve_cli
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,17 @@ CLAUDE_CODE_FALLBACK_MODELS = [
 ]
 CLAUDE_CODE_DEFAULT_MODEL = "claude-sonnet-4-5"
 
-CODEX_CLI_MODELS = ["o4-mini", "o3", "o3-mini"]
+CODEX_CLI_MODELS = [
+    "gpt-5.1-codex",
+    "gpt-5.1",
+    "gpt-5.2",
+    "gpt-5.1-codex-mini",
+    "o4-mini",
+    "o3",
+    "o3-mini",
+]
 CODEX_CLI_REASONING_EFFORTS = ["low", "medium", "high"]
-CODEX_CLI_DEFAULT_MODEL = "o4-mini"
+CODEX_CLI_DEFAULT_MODEL = "gpt-5.1-codex"
 
 COPILOT_CLI_MODELS = [
     "claude-sonnet-4.6",
@@ -55,8 +64,9 @@ async def _fetch_claude_models() -> List[str]:
     Falls back to the hardcoded list if the CLI is unavailable or errors.
     """
     try:
+        claude_cli = resolve_cli("claude")
         proc = await asyncio.create_subprocess_exec(
-            "claude",
+            claude_cli,
             "--version",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

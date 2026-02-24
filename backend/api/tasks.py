@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import shlex
+from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,32 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
+
+@dataclass(frozen=True)
+class WorkspaceCleanupRef:
+    workspace_id: int
+    workspace_type: WorkspaceType
+    path: str
+    host: Optional[str]
+    ssh_user: Optional[str]
+
+
+def _snapshot_workspace_for_cleanup(workspace: Workspace) -> WorkspaceCleanupRef:
+    return WorkspaceCleanupRef(
+        workspace_id=workspace.workspace_id,
+        workspace_type=workspace.workspace_type,
+        path=workspace.path,
+        host=workspace.host,
+        ssh_user=workspace.ssh_user,
+    )
+
+
+async def _load_task_with_run(db: AsyncSession, task_id: int) -> Optional[Task]:
+    result = await db.execute(
+        select(Task).options(selectinload(Task.run)).where(Task.id == task_id)
+    )
+    return result.scalar_one_or_none()
 
 
 def _set_task_for_requeue(task: Task, prompt: str, model: Optional[str] = None) -> None:
@@ -73,12 +100,7 @@ async def create_task(
     task_id = new_task.id
     await db.commit()
 
-    result = await db.execute(
-        select(Task).options(selectinload(Task.run)).where(Task.id == task_id)
-    )
-    refreshed_task = result.scalar_one_or_none()
-
-    return refreshed_task
+    return await _load_task_with_run(db, task_id)
 
 
 @router.get("", response_model=List[TaskResponse])
@@ -188,7 +210,7 @@ async def _update_task(
 
     await db.commit()
 
-    return task
+    return await _load_task_with_run(db, task_id)
 
 
 @router.post("/{task_id}/cancel")
@@ -238,7 +260,7 @@ async def retry_task(
 
     await db.commit()
 
-    return task
+    return await _load_task_with_run(db, task_id)
 
 
 @router.post("/{task_id}/continue", response_model=TaskResponse)
@@ -280,7 +302,7 @@ async def continue_task(
 
     await db.commit()
 
-    return task
+    return await _load_task_with_run(db, task_id)
 
 
 @router.post("/{task_id}/merge", response_model=TaskResponse)
@@ -312,6 +334,7 @@ async def merge_task(
     workspace = workspace_result.scalar_one_or_none()
     if not workspace:
         raise HTTPException(status_code=400, detail="Workspace not found")
+    cleanup_workspace = _snapshot_workspace_for_cleanup(workspace)
 
     target_branch = (task.branch_name or "main").strip() or "main"
     task_branch = _get_task_branch(task.id)
@@ -345,9 +368,9 @@ async def merge_task(
 
     # Cleanup worktree after commit using saved values
     if worktree_path:
-        await _remove_worktree(task_id, worktree_path, workspace)
+        await _remove_worktree(task_id, worktree_path, cleanup_workspace)
 
-    return task
+    return await _load_task_with_run(db, task_id)
 
 
 @router.post("/{task_id}/mark-done", response_model=TaskResponse)
@@ -374,12 +397,14 @@ async def mark_task_done(
 
     # Capture worktree info before committing so we can clean up after
     worktree_path = task.worktree_path
-    workspace: Optional[Workspace] = None
+    cleanup_workspace: Optional[WorkspaceCleanupRef] = None
     if worktree_path:
         ws_result = await db.execute(
             select(Workspace).where(Workspace.workspace_id == task.workspace_id)
         )
         workspace = ws_result.scalar_one_or_none()
+        if workspace:
+            cleanup_workspace = _snapshot_workspace_for_cleanup(workspace)
 
     task.status = TaskStatus.DONE
     task.worktree_path = None
@@ -388,10 +413,10 @@ async def mark_task_done(
     logger.info("Task %s marked as DONE manually", task_id)
 
     # Best-effort worktree cleanup (after DB commit so status update is not blocked)
-    if worktree_path and workspace:
-        await _remove_worktree(task_id, worktree_path, workspace)
+    if worktree_path and cleanup_workspace:
+        await _remove_worktree(task_id, worktree_path, cleanup_workspace)
 
-    return task
+    return await _load_task_with_run(db, task_id)
 
 
 @router.delete("/{task_id}")
@@ -413,12 +438,14 @@ async def delete_task(
 
     # Capture worktree info and workspace BEFORE deletion - don't rely on task relationships after deletion
     worktree_path = task.worktree_path
-    workspace: Optional[Workspace] = None
+    cleanup_workspace: Optional[WorkspaceCleanupRef] = None
     if worktree_path:
         ws_result = await db.execute(
             select(Workspace).where(Workspace.workspace_id == task.workspace_id)
         )
         workspace = ws_result.scalar_one_or_none()
+        if workspace:
+            cleanup_workspace = _snapshot_workspace_for_cleanup(workspace)
 
     # Break potential FK cycle before deleting runs.
     task.run_id = None
@@ -436,8 +463,8 @@ async def delete_task(
 
     # Best-effort worktree cleanup (after DB commit so task deletion is not blocked)
     # Use saved worktree_path and workspace objects, not task references
-    if worktree_path and workspace:
-        await _remove_worktree(task_id, worktree_path, workspace)
+    if worktree_path and cleanup_workspace:
+        await _remove_worktree(task_id, worktree_path, cleanup_workspace)
 
     return {"message": "Task deleted successfully"}
 
@@ -1128,7 +1155,7 @@ async def _merge_on_ssh_workspace(
     raise RuntimeError(f"Merge failed: {_combine_git_output(out, err)}")
 
 
-async def _remove_worktree(task_id: int, worktree_path: str, workspace: Workspace) -> None:
+async def _remove_worktree(task_id: int, worktree_path: str, workspace: WorkspaceCleanupRef) -> None:
     """Remove a git worktree directory and its associated branch.
 
     Each step is attempted independently so a partial failure does not

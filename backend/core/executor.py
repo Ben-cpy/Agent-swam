@@ -207,6 +207,12 @@ class TaskExecutor:
             task.status = TaskStatus.RUNNING
             task.run_id = run.run_id
             task.updated_at = datetime.now(timezone.utc)
+            run_id = run.run_id
+            backend_value = task.backend.value
+            prompt_text = task.prompt
+            permission_mode = task.permission_mode
+            workspace_path = workspace.path
+            task_pk = task.id
             await db.commit()
 
             logger.info(
@@ -218,14 +224,14 @@ class TaskExecutor:
 
             asyncio.create_task(
                 self._run_ssh_task(
-                    task_id=task.id,
-                    run_id=run.run_id,
+                    task_id=task_pk,
+                    run_id=run_id,
                     ssh_host=ssh_host,
-                    workspace_path=workspace.path,
-                    backend=task.backend.value,
-                    prompt=task.prompt,
+                    workspace_path=workspace_path,
+                    backend=backend_value,
+                    prompt=prompt_text,
                     tmux_session=tmux_session_name,
-                    permission_mode=task.permission_mode,
+                    permission_mode=permission_mode,
                 )
             )
             return True
@@ -276,24 +282,33 @@ class TaskExecutor:
         task.status = TaskStatus.RUNNING
         task.run_id = run.run_id
         task.updated_at = datetime.now(timezone.utc)
+        task_backend = task.backend
+        backend_value = task.backend.value
+        task_worktree_path = task.worktree_path
+        run_id = run.run_id
+        task_pk = task.id
+        prompt_text = task.prompt
+        model_name = task.model
+        permission_mode = task.permission_mode
+        effective_workspace_path = task_worktree_path or workspace.path
         await db.commit()
 
         logger.info(
             "Starting task %s with backend %s in worktree %s",
             task_id,
-            task.backend,
-            task.worktree_path,
+            task_backend,
+            task_worktree_path,
         )
 
         asyncio.create_task(
             self._run_task(
-                task_id=task.id,
-                run_id=run.run_id,
-                workspace_path=task.worktree_path or workspace.path,
-                backend=task.backend.value,
-                prompt=task.prompt,
-                model=task.model,
-                permission_mode=task.permission_mode,
+                task_id=task_pk,
+                run_id=run_id,
+                workspace_path=effective_workspace_path,
+                backend=backend_value,
+                prompt=prompt_text,
+                model=model_name,
+                permission_mode=permission_mode,
             )
         )
         return True
