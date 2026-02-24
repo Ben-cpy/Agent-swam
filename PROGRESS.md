@@ -5,6 +5,7 @@
   - Bug4：`zsh --login -c`是非交互shell，不自动source`.zshrc`；修复：在`-c`命令体开头显式`source ~/.zshrc 2>/dev/null`。
   - Bug5：`--dangerously-skip-permissions`在root用户下被claude拒绝（容器默认root）；修复：SSH任务默认改用`--permission-mode dontAsk`，效果相同但允许root运行。
   - 避免复发：容器任务几乎都是root；`--dangerously-skip-permissions`只适合非root；`dontAsk`是SSH/容器自动化任务的正确默认值。
+  - Commit: `07a22c1`
 
 * **SSH工作区全面修复 + 工作区健康检查（5297811，2026-02-24）**：
   - 问题1(P0): SSH工作区创建Task后立即失败，executor仅用 `workspace.host`（无端口/用户）建立SSH连接，导致连接目标错误；SSH任务未cd到工作目录，AI在未知目录执行。
