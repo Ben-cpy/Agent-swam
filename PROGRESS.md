@@ -180,7 +180,7 @@
   - 问题：SSH/SSH_CONTAINER 工作区的任务 0.4 秒即失败，worktree 路径错误（Windows 路径）；tmux 命令因单引号嵌套失败；codex 使用错误的 `-p` profile 参数；`$PROMPT` 变量被外层脚本 bash 提前展开导致 `bash: the: command not found`；exit code 取的是 `tee` 的返回值而非实际命令。
   - 解决：(1) 用 base64 编码将脚本写入远程临时文件，彻底避免 tmux 命令中的引号冲突；(2) 修复 codex 命令格式为 stdin 管道（`printf "%s" "$PROMPT" | codex ... -`）；(3) 在容器内 source nvm 解决 CLI 工具 PATH 问题；(4) 对 `docker exec bash -c "..."` 的参数转义 `$` → `\$`、`"` → `\"`，防止外层 bash 提前展开变量；(5) 用 `${PIPESTATUS[0]}` 正确捕获管道首命令的退出码；(6) 新增 `ssh_utils.py` 集中管理 SSH 连接参数构建。
   - 避免复发：SSH+Container 的双层 shell（外层脚本 + docker exec bash -c）中，所有需在容器内展开的 `$var` 和 `$(...)` 都必须转义；提示文本等动态内容通过 base64 传递避免注入。
-  - Commit: TBD
+  - Commit: `8c91ebc`
 
 * **任务完成全局通知扩展（dba1e2d，2026-02-24）**：
   - 问题：当前前端仅在任务进入 `TO_BE_REVIEW` 时弹窗，任务执行后若直接失败或已完成，用户切到其他浏览器标签页时容易错过状态变化。
