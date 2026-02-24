@@ -1,4 +1,13 @@
-﻿* **7个Bug批量修复（待commit，2026-02-24）**：
+* **SSH工作区全面修复 + 工作区健康检查（5297811，2026-02-24）**：
+  - 问题1(P0): SSH工作区创建Task后立即失败，executor仅用 `workspace.host`（无端口/用户）建立SSH连接，导致连接目标错误；SSH任务未cd到工作目录，AI在未知目录执行。
+  - 问题2(P0): SSH工作区的worktree被错误创建在Windows本地路径（`workspace.path`是`ssh://...`全路径），实际应在远程主机上创建。
+  - 问题3(P1): SSH+Container工作区未调用docker exec，命令在SSH主机上直接执行而非容器内。
+  - 解决：新增 `backend/core/ssh_utils.py` 提取三个共享工具函数：`build_ssh_connection_args`（包含端口/用户/BatchMode）、`extract_remote_path`（从canonical URL提取远程路径）、`run_ssh_command`；重构 `executor.py` 的SSH任务流程：先SSH检测远程分支→SSH创建远程git worktree→SSH启动tmux，AI命令使用正确的`cd path && cmd`或`docker exec -w path container bash -c cmd`；修复 `workspaces.py` 资源监控和文件列表的SSH调用使用正确连接参数。
+  - 新增：`GET /api/workspaces/{id}/health` 端点，返回`{reachable, is_git, message}`；任务创建前校验工作区是否为git仓库，非git仓库直接返回400；前端新增 `WorkspaceHealthBadge` 组件（绿✓/黄⚠/红✗图标+tooltip），集成到WorkspaceManager、WorkspaceCard、工作区看板页面。
+  - 避免复发：SSH命令构建必须通过 `build_ssh_connection_args` 统一处理；`workspace.path` 是canonical URL不是本地路径，SSH场景下需用 `extract_remote_path` 提取实际路径。
+  - Commit: `5297811`
+
+* **7个Bug批量修复（待commit，2026-02-24）**：
   - Bug1(P0): scheduler.py `_update_heartbeat` 先更新 `heartbeat_at` 再判断阈值，永远不会将 Runner 标记 OFFLINE。修复：阈值判断移到更新之前，且只更新本地 runner 的心跳（按 `settings.runner_env` 过滤）。
   - Bug2(P0): LogStream.tsx SSE 事件 `data.content` 为多行文本时，原 `parseLine/parseCopilotLine` 只处理单行，改为 `processRawLogs(data.content, backend)` 逐行切割解析。
   - Bug3(P1): workspaces.py Windows 11 21H2+ 已移除 `wmic`，改用 `PowerShell Get-CimInstance Win32_OperatingSystem | ConvertTo-Json`，同步更新 `_parse_memory_windows` 解析 JSON 格式。
@@ -166,6 +175,12 @@
   - 解决：在 `backend/core/scheduler.py` 新增 `_normalize_utc()`，统一将 SQLite 读出的 naive datetime 归一化为 UTC aware，再进行离线阈值比较。
   - 避免复发：凡是从 SQLite 读取并参与时间比较的字段，比较前必须显式做时区归一化，不能假设 ORM 返回值自带 tzinfo。
   - Commit: `20dadee`
+
+* **SSH+Container 任务执行链路修复（2026-02-24）**：
+  - 问题：SSH/SSH_CONTAINER 工作区的任务 0.4 秒即失败，worktree 路径错误（Windows 路径）；tmux 命令因单引号嵌套失败；codex 使用错误的 `-p` profile 参数；`$PROMPT` 变量被外层脚本 bash 提前展开导致 `bash: the: command not found`；exit code 取的是 `tee` 的返回值而非实际命令。
+  - 解决：(1) 用 base64 编码将脚本写入远程临时文件，彻底避免 tmux 命令中的引号冲突；(2) 修复 codex 命令格式为 stdin 管道（`printf "%s" "$PROMPT" | codex ... -`）；(3) 在容器内 source nvm 解决 CLI 工具 PATH 问题；(4) 对 `docker exec bash -c "..."` 的参数转义 `$` → `\$`、`"` → `\"`，防止外层 bash 提前展开变量；(5) 用 `${PIPESTATUS[0]}` 正确捕获管道首命令的退出码；(6) 新增 `ssh_utils.py` 集中管理 SSH 连接参数构建。
+  - 避免复发：SSH+Container 的双层 shell（外层脚本 + docker exec bash -c）中，所有需在容器内展开的 `$var` 和 `$(...)` 都必须转义；提示文本等动态内容通过 base64 传递避免注入。
+  - Commit: TBD
 
 * **任务完成全局通知扩展（dba1e2d，2026-02-24）**：
   - 问题：当前前端仅在任务进入 `TO_BE_REVIEW` 时弹窗，任务执行后若直接失败或已完成，用户切到其他浏览器标签页时容易错过状态变化。

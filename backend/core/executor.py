@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -560,44 +561,87 @@ class TaskExecutor:
 
         - remote_path: the actual remote worktree directory to execute in.
         - For SSH_CONTAINER workspaces, commands are wrapped with docker exec.
+        - Shell quoting is avoided by base64-encoding the script and writing it to a temp file.
         """
+        log_file = f"/tmp/{tmux_session}.log"
+        script_file = f"/tmp/{tmux_session}.sh"
         try:
-            log_file = f"/tmp/{tmux_session}.log"
             ssh_args = build_ssh_connection_args(ssh_host, ssh_port, ssh_user)
 
-            # Build the AI CLI command (backend-specific)
+            # Build the AI CLI commands for the remote Linux shell.
+            # Strategy: base64-encode the prompt so it's safe to embed anywhere, then decode
+            # it into a shell variable $PROMPT. All AI commands reference "$PROMPT".
+            # The entire script is base64-encoded when transferred, so no shell escaping needed
+            # for the script content itself.
+            prompt_b64 = base64.b64encode(prompt.encode()).decode()
+            # prompt_b64 contains only [A-Za-z0-9+/=] – safe to embed in any quoting context
+
             if backend == "claude_code":
                 if not permission_mode or permission_mode == "bypassPermissions":
                     perm_flag = "--dangerously-skip-permissions"
                 else:
-                    perm_flag = f"--permission-mode {shlex.quote(permission_mode)}"
-                cli_cmd = f"claude -p --output-format stream-json {perm_flag} {shlex.quote(prompt)}"
+                    perm_flag = f"--permission-mode {permission_mode}"
+                # Claude accepts prompt as CLI argument; use double-quoted variable expansion
+                ai_cmd = f'claude -p --output-format stream-json {perm_flag} "$PROMPT"'
             elif backend == "codex_cli":
-                cli_cmd = f"codex -p {shlex.quote(prompt)}"
+                # Codex reads from stdin
+                ai_cmd = (
+                    f'printf "%s" "$PROMPT" | '
+                    f"codex --ask-for-approval never exec --json --sandbox danger-full-access "
+                    f"--cd {shlex.quote(remote_path)} -"
+                )
             elif backend == "copilot_cli":
-                cli_cmd = f"copilot -p {shlex.quote(prompt)} --allow-all --no-color --no-alt-screen"
+                ai_cmd = 'copilot --allow-all --no-color --no-alt-screen -p "$PROMPT"'
             else:
                 raise ValueError(f"Unknown backend: {backend}")
 
-            # Wrap command with correct execution context (cd for SSH, docker exec for container)
-            if workspace_type == WorkspaceType.SSH_CONTAINER:
-                exec_cmd = (
-                    f"docker exec -w {shlex.quote(remote_path)} "
-                    f"{shlex.quote(container_name or '')} bash -c {shlex.quote(cli_cmd)}"
-                )
-            else:
-                exec_cmd = f"cd {shlex.quote(remote_path)} && {cli_cmd}"
-
-            # Build the tmux command: create a new session running the CLI, piping output to a log file
-            tmux_cmd = (
-                f"tmux new-session -d -s {shlex.quote(tmux_session)} "
-                f"'({exec_cmd}) 2>&1 | tee {shlex.quote(log_file)}; "
-                f"echo EXIT_CODE:$? >> {shlex.quote(log_file)}'"
+            # Shell preamble: source nvm/bashrc so CLI tools on PATH, decode prompt into $PROMPT
+            shell_preamble = (
+                "source /root/.nvm/nvm.sh 2>/dev/null; "
+                "source ~/.nvm/nvm.sh 2>/dev/null; "
+                "source ~/.bashrc 2>/dev/null; "
+                f'PROMPT=$(echo {prompt_b64} | base64 -d); '
             )
 
-            # Launch the tmux session on the remote host
+            # Build the full command that runs inside the target environment.
+            # For SSH_CONTAINER: the outer script bash must NOT expand $PROMPT / $(...) before
+            # passing the string to docker exec — those should expand INSIDE the container.
+            # Fix: escape '$' → '\$' and '"' → '\"' so the outer bash treats them as literals;
+            # the container's bash then evaluates them correctly.
+            if workspace_type == WorkspaceType.SSH_CONTAINER:
+                inner_cmd = f"{shell_preamble}cd {shlex.quote(remote_path)} && {ai_cmd}"
+                # Escape $ first (before "), then escape " to survive bash -c "..."
+                inner_cmd_escaped = inner_cmd.replace("$", r"\$").replace('"', '\\"')
+                exec_cmd = (
+                    f"docker exec -w {shlex.quote(remote_path)} "
+                    f"{shlex.quote(container_name or '')} "
+                    f'bash -c "{inner_cmd_escaped}"'
+                )
+            else:
+                # Non-container SSH: script runs directly on the host, $PROMPT expands naturally
+                exec_cmd = f"{shell_preamble}cd {shlex.quote(remote_path)} && {ai_cmd}"
+
+            # Write the full pipeline to a shell script file using base64 to avoid quoting hell.
+            # The script content may contain arbitrary characters (single quotes, etc.) that would
+            # break shell quoting if passed directly. Base64 encoding ensures safe transfer.
+            # Use PIPESTATUS[0] to capture the exit code of the actual command, not tee.
+            script_content = (
+                f"#!/bin/bash\n"
+                f"({exec_cmd}) 2>&1 | tee {shlex.quote(log_file)}\n"
+                f"echo EXIT_CODE:${{PIPESTATUS[0]}} >> {shlex.quote(log_file)}\n"
+            )
+            encoded_script = base64.b64encode(script_content.encode()).decode()
+
+            # Two-step remote command: decode+write script, then launch via tmux
+            # base64 output is safe to single-quote (only [A-Za-z0-9+/=])
+            setup_and_launch = (
+                f"printf '%s' '{encoded_script}' | base64 -d > {shlex.quote(script_file)} && "
+                f"chmod +x {shlex.quote(script_file)} && "
+                f"tmux new-session -d -s {shlex.quote(tmux_session)} bash {shlex.quote(script_file)}"
+            )
+
             launch_proc = await asyncio.create_subprocess_exec(
-                "ssh", *ssh_args, tmux_cmd,
+                "ssh", *ssh_args, setup_and_launch,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -684,11 +728,12 @@ class TaskExecutor:
             await self._persist_internal_error(task_id, run_id, str(exc))
         finally:
             _cancelled_task_ids.discard(task_id)
-            # Clean up temporary log file on remote host
+            # Clean up temporary log and script files on remote host
             try:
                 ssh_args = build_ssh_connection_args(ssh_host, ssh_port, ssh_user)
                 await asyncio.create_subprocess_exec(
-                    "ssh", *ssh_args, f"rm -f {shlex.quote(log_file)}",
+                    "ssh", *ssh_args,
+                    f"rm -f {shlex.quote(log_file)} {shlex.quote(script_file)}",
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
