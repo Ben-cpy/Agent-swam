@@ -1,3 +1,6 @@
+import asyncio
+import logging
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy import event
@@ -6,16 +9,32 @@ from config import settings
 
 Base = declarative_base()
 
+logger = logging.getLogger(__name__)
+
+engine_kwargs = {}
+if settings.database_url.startswith("sqlite"):
+    # Avoid immediate "database is locked" failures under concurrent writes.
+    engine_kwargs["connect_args"] = {"timeout": 30}
+
 engine = create_async_engine(
     settings.database_url,
     echo=settings.log_level == "DEBUG",
-    future=True
+    future=True,
+    **engine_kwargs,
 )
 
 if settings.database_url.startswith("sqlite"):
     @event.listens_for(engine.sync_engine, "connect")
     def _set_sqlite_pragma(dbapi_connection, _connection_record):
-        dbapi_connection.execute("PRAGMA foreign_keys=ON")
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+            # WAL allows readers and a writer to coexist, critical for SSE polling.
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+        finally:
+            cursor.close()
 
 async_session_maker = sessionmaker(
     engine,
@@ -27,16 +46,25 @@ async_session_maker = sessionmaker(
 
 
 async def get_db():
-    """Dependency for FastAPI routes to get database session"""
-    async with async_session_maker() as session:
+    """Dependency for FastAPI routes to get a database session."""
+    session = async_session_maker()
+    try:
+        yield session
+    finally:
+        if session.in_transaction():
+            try:
+                await asyncio.shield(session.rollback())
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.debug("Session rollback failed during cleanup", exc_info=True)
+
         try:
-            yield session
-            await session.commit()
+            await asyncio.shield(session.close())
+        except asyncio.CancelledError:
+            pass
         except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+            logger.debug("Session close failed during cleanup", exc_info=True)
 
 
 async def _migrate_tasks_backend_constraint(conn) -> None:

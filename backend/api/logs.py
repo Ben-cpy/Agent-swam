@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
-from database import get_db
+from database import get_db, async_session_maker
 from models import Run, Task, TaskStatus
 import asyncio
 import json
@@ -14,7 +14,6 @@ router = APIRouter(prefix="/api/logs", tags=["logs"])
 @router.get("/{run_id}/stream")
 async def stream_logs(
     run_id: int,
-    db: AsyncSession = Depends(get_db)
 ):
     """
     Stream logs for a run via Server-Sent Events (SSE).
@@ -23,10 +22,11 @@ async def stream_logs(
     For running tasks, streams logs as they arrive (polls database).
     """
     # Verify run exists
-    result = await db.execute(
-        select(Run).where(Run.run_id == run_id)
-    )
-    run = result.scalar_one_or_none()
+    async with async_session_maker() as db:
+        result = await db.execute(
+            select(Run).where(Run.run_id == run_id)
+        )
+        run = result.scalar_one_or_none()
 
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -34,60 +34,64 @@ async def stream_logs(
     async def event_generator():
         last_sent_length = 0
 
-        while True:
-            # Use populate_existing=True to bypass SQLAlchemy's identity map cache
-            # and always fetch the latest data written by the background executor task
-            result = await db.execute(
-                select(Run).where(Run.run_id == run_id).execution_options(populate_existing=True)
-            )
-            current_run = result.scalar_one_or_none()
+        try:
+            while True:
+                async with async_session_maker() as db:
+                    # Use populate_existing=True to bypass identity map cache and fetch fresh state.
+                    result = await db.execute(
+                        select(Run).where(Run.run_id == run_id).execution_options(populate_existing=True)
+                    )
+                    current_run = result.scalar_one_or_none()
 
-            if not current_run:
-                break
+                    if not current_run:
+                        break
 
-            # Send new log data
-            if current_run.log_blob:
-                current_log = current_run.log_blob or ""
+                    # Send new log data
+                    if current_run.log_blob:
+                        current_log = current_run.log_blob or ""
 
-                # Send only new content
-                if len(current_log) > last_sent_length:
-                    new_content = current_log[last_sent_length:]
-                    last_sent_length = len(current_log)
+                        # Send only new content
+                        if len(current_log) > last_sent_length:
+                            new_content = current_log[last_sent_length:]
+                            last_sent_length = len(current_log)
 
-                    yield {
-                        "event": "log",
-                        "data": json.dumps({
-                            "run_id": run_id,
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                            "content": new_content
-                        })
-                    }
+                            yield {
+                                "event": "log",
+                                "data": json.dumps({
+                                    "run_id": run_id,
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    "content": new_content
+                                })
+                            }
 
-            # Check if run is complete
-            if current_run.ended_at:
-                # Send completion event
-                yield {
-                    "event": "complete",
-                    "data": json.dumps({
-                        "run_id": run_id,
-                        "exit_code": current_run.exit_code,
-                        "ended_at": current_run.ended_at.isoformat() if current_run.ended_at else None
-                    })
-                }
-                break
+                    # Check if run is complete
+                    if current_run.ended_at:
+                        # Send completion event
+                        yield {
+                            "event": "complete",
+                            "data": json.dumps({
+                                "run_id": run_id,
+                                "exit_code": current_run.exit_code,
+                                "ended_at": current_run.ended_at.isoformat() if current_run.ended_at else None
+                            })
+                        }
+                        break
 
-            # Check if task is still running
-            result = await db.execute(
-                select(Task).where(Task.run_id == run_id).execution_options(populate_existing=True)
-            )
-            task = result.scalar_one_or_none()
+                    # Check if task is still running
+                    result = await db.execute(
+                        select(Task).where(Task.run_id == run_id).execution_options(populate_existing=True)
+                    )
+                    task = result.scalar_one_or_none()
 
-            if task and task.status not in [TaskStatus.RUNNING, TaskStatus.TODO]:
-                # Task finished, send final data and close
-                break
+                    if task and task.status not in [TaskStatus.RUNNING, TaskStatus.TODO]:
+                        # Task finished, send final data and close
+                        break
 
-            # Wait before polling again
-            await asyncio.sleep(1)
+                # Wait before polling again
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            # Client disconnected; exit quietly without touching long-lived transactions.
+            return
 
     return EventSourceResponse(event_generator())
 
