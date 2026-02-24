@@ -9,8 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  getReviewNotificationEnabled,
-  setReviewNotificationEnabled,
+  getTaskCompletionNotificationEnabled,
+  setTaskCompletionNotificationEnabled,
 } from '@/lib/reviewNotificationSettings';
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -25,7 +25,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
 export default function SettingsPage() {
   const [workspaceMaxParallel, setWorkspaceMaxParallel] = useState('3');
-  const [reviewNotificationsEnabled, setReviewNotificationsEnabled] = useState(true);
+  const [taskCompletionNotificationsEnabled, setTaskCompletionNotificationsEnabled] = useState(true);
   const [notificationsReady, setNotificationsReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -45,7 +45,7 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    setReviewNotificationsEnabled(getReviewNotificationEnabled());
+    setTaskCompletionNotificationsEnabled(getTaskCompletionNotificationEnabled());
     setNotificationsReady(true);
   }, []);
 
@@ -71,9 +71,9 @@ export default function SettingsPage() {
     }
   };
 
-  const handleReviewNotificationsToggle = (enabled: boolean) => {
-    setReviewNotificationsEnabled(enabled);
-    setReviewNotificationEnabled(enabled);
+  const handleTaskCompletionNotificationsToggle = (enabled: boolean) => {
+    setTaskCompletionNotificationsEnabled(enabled);
+    setTaskCompletionNotificationEnabled(enabled);
   };
 
   return (
@@ -133,16 +133,16 @@ export default function SettingsPage() {
               id="review-notification-enabled"
               type="checkbox"
               className="h-4 w-4 rounded border-gray-300 mt-1"
-              checked={reviewNotificationsEnabled}
-              onChange={(e) => handleReviewNotificationsToggle(e.target.checked)}
+              checked={taskCompletionNotificationsEnabled}
+              onChange={(e) => handleTaskCompletionNotificationsToggle(e.target.checked)}
               disabled={!notificationsReady}
             />
             <div className="space-y-1">
               <Label htmlFor="review-notification-enabled">
-                Notify when task enters TO_BE_REVIEW
+                Notify when task run completes
               </Label>
               <p className="text-xs text-muted-foreground">
-                Browser popup notification. Silent mode stays enabled.
+                Browser popup notification when task becomes TO_BE_REVIEW, DONE, or FAILED.
               </p>
             </div>
           </div>

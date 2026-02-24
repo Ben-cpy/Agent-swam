@@ -5,24 +5,53 @@ import useSWR from 'swr';
 import { taskAPI } from '@/lib/api';
 import { Task, TaskStatus } from '@/lib/types';
 import {
-  getReviewNotificationEnabled,
-  REVIEW_NOTIFICATION_ENABLED_KEY,
-  REVIEW_NOTIFICATION_SETTING_EVENT,
+  getTaskCompletionNotificationEnabled,
+  TASK_COMPLETION_NOTIFICATION_ENABLED_KEY,
+  TASK_COMPLETION_NOTIFICATION_SETTING_EVENT,
 } from '@/lib/reviewNotificationSettings';
 
-const NOTIFICATION_PERMISSION_KEY = 'review_notification_permission_requested_v1';
+const NOTIFICATION_PERMISSION_KEY = 'task_completion_notification_permission_requested_v1';
 const POLL_INTERVAL_MS = 2000;
 const AUTO_CLOSE_MS = 10000;
+const COMPLETION_STATUSES = new Set<TaskStatus>([
+  TaskStatus.TO_BE_REVIEW,
+  TaskStatus.DONE,
+  TaskStatus.FAILED,
+]);
+
+function isCompletionStatus(status: TaskStatus): boolean {
+  return COMPLETION_STATUSES.has(status);
+}
 
 function openTaskPage(taskId: number) {
   window.focus();
   window.location.href = `/tasks/${taskId}`;
 }
 
-function showReviewNotification(task: Task) {
-  const notification = new Notification('Task Ready For Review', {
-    body: `#${task.id} ${task.title}`,
-    tag: `task-review-${task.id}`,
+function getNotificationTitle(task: Task): string {
+  if (task.status === TaskStatus.FAILED) {
+    return 'Task Failed';
+  }
+  if (task.status === TaskStatus.DONE) {
+    return 'Task Done';
+  }
+  return 'Task Ready For Review';
+}
+
+function getNotificationBody(task: Task): string {
+  if (task.status === TaskStatus.FAILED) {
+    return `#${task.id} ${task.title}`;
+  }
+  if (task.status === TaskStatus.DONE) {
+    return `#${task.id} ${task.title}`;
+  }
+  return `#${task.id} ${task.title}`;
+}
+
+function showCompletionNotification(task: Task) {
+  const notification = new Notification(getNotificationTitle(task), {
+    body: getNotificationBody(task),
+    tag: `task-completion-${task.id}`,
     silent: true,
   });
 
@@ -43,13 +72,13 @@ function requestNotificationPermissionOnce() {
   void Notification.requestPermission();
 }
 
-export default function ToBeReviewNotifier() {
+export default function TaskCompletionNotifier() {
   const previousStatusByTask = useRef<Map<number, TaskStatus>>(new Map());
   const initialized = useRef(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
 
   const { data } = useSWR(
-    notificationsEnabled ? '/tasks/review-notifier' : null,
+    notificationsEnabled ? '/tasks/completion-notifier' : null,
     () => taskAPI.list(),
     { refreshInterval: POLL_INTERVAL_MS, revalidateOnFocus: true }
   );
@@ -59,20 +88,20 @@ export default function ToBeReviewNotifier() {
     if (typeof window === 'undefined') return;
 
     const syncEnabled = () => {
-      setNotificationsEnabled(getReviewNotificationEnabled());
+      setNotificationsEnabled(getTaskCompletionNotificationEnabled());
     };
     const onStorage = (event: StorageEvent) => {
-      if (event.key === REVIEW_NOTIFICATION_ENABLED_KEY) {
+      if (event.key === TASK_COMPLETION_NOTIFICATION_ENABLED_KEY) {
         syncEnabled();
       }
     };
 
     syncEnabled();
-    window.addEventListener(REVIEW_NOTIFICATION_SETTING_EVENT, syncEnabled);
+    window.addEventListener(TASK_COMPLETION_NOTIFICATION_SETTING_EVENT, syncEnabled);
     window.addEventListener('storage', onStorage);
 
     return () => {
-      window.removeEventListener(REVIEW_NOTIFICATION_SETTING_EVENT, syncEnabled);
+      window.removeEventListener(TASK_COMPLETION_NOTIFICATION_SETTING_EVENT, syncEnabled);
       window.removeEventListener('storage', onStorage);
     };
   }, []);
@@ -100,22 +129,22 @@ export default function ToBeReviewNotifier() {
 
     const transitionedTasks = tasks.filter((task) => {
       const previousStatus = previousMap.get(task.id);
-      if (task.status !== TaskStatus.TO_BE_REVIEW) return false;
+      if (!isCompletionStatus(task.status)) return false;
       if (previousStatus == null) return true;
-      return previousStatus !== TaskStatus.TO_BE_REVIEW;
+      return !isCompletionStatus(previousStatus);
     });
 
     if (transitionedTasks.length > 0 && 'Notification' in window) {
       transitionedTasks.forEach((task) => {
         if (Notification.permission === 'granted') {
-          showReviewNotification(task);
+          showCompletionNotification(task);
           return;
         }
 
         if (Notification.permission === 'default') {
           void Notification.requestPermission().then((permission) => {
             if (permission === 'granted') {
-              showReviewNotification(task);
+              showCompletionNotification(task);
             }
           });
         }
