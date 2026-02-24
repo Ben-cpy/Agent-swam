@@ -14,6 +14,7 @@ from core.ssh_utils import build_ssh_connection_args, extract_remote_path, run_s
 from models import Workspace, Runner, WorkspaceType, Task, TaskStatus, Run
 from schemas import (
     WorkspaceCreate,
+    WorkspaceUpdate,
     WorkspaceResponse,
     WorkspaceResourcesResponse,
     WorkspaceHealthResponse,
@@ -130,6 +131,32 @@ async def get_workspace(
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
+    return workspace
+
+
+@router.patch("/{workspace_id}", response_model=WorkspaceResponse)
+async def update_workspace(
+    workspace_id: int,
+    payload: WorkspaceUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Partially update a workspace (display_name, login_shell, concurrency_limit)."""
+    ws_result = await db.execute(select(Workspace).where(Workspace.workspace_id == workspace_id))
+    workspace = ws_result.scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    if payload.display_name is not None:
+        workspace.display_name = payload.display_name
+    if payload.login_shell is not None:
+        if payload.login_shell not in ("bash", "zsh", "sh"):
+            raise HTTPException(status_code=400, detail="login_shell must be one of: bash, zsh, sh")
+        workspace.login_shell = payload.login_shell
+    if payload.concurrency_limit is not None:
+        workspace.concurrency_limit = payload.concurrency_limit
+
+    await db.commit()
+    await db.refresh(workspace)
     return workspace
 
 

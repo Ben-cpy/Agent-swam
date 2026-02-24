@@ -28,6 +28,7 @@ type FormState = {
   port: string;
   ssh_user: string;
   container_name: string;
+  login_shell: string;
 };
 
 const initialForm: FormState = {
@@ -38,6 +39,7 @@ const initialForm: FormState = {
   port: '22',
   ssh_user: '',
   container_name: '',
+  login_shell: 'bash',
 };
 
 function getWorkspaceTypeLabel(type: WorkspaceType): string {
@@ -130,6 +132,7 @@ export default function WorkspaceManager() {
       if (form.workspace_type === WorkspaceType.SSH_CONTAINER) {
         payload.container_name = form.container_name.trim();
       }
+      payload.login_shell = form.login_shell || 'bash';
     }
 
     setSubmitting(true);
@@ -241,6 +244,28 @@ export default function WorkspaceManager() {
               </div>
             )}
 
+            {form.workspace_type !== WorkspaceType.LOCAL && (
+              <div className="space-y-2">
+                <Label>Login Shell</Label>
+                <Select
+                  value={form.login_shell}
+                  onValueChange={(v) => setForm((prev) => ({ ...prev, login_shell: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bash">bash</SelectItem>
+                    <SelectItem value="zsh">zsh</SelectItem>
+                    <SelectItem value="sh">sh</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Shell used to run AI tasks on the remote host. Choose zsh if your proxy settings are configured in ~/.zshrc.
+                </p>
+              </div>
+            )}
+
             <div className="flex gap-3">
               <Button type="submit" disabled={!canSubmit || submitting}>
                 {submitting ? 'Creating...' : 'Add Workspace'}
@@ -296,10 +321,35 @@ export default function WorkspaceManager() {
                 {ws.path}
               </div>
               {ws.workspace_type !== WorkspaceType.LOCAL && (
-                <div className="text-xs text-muted-foreground">
-                  Host: {ws.host} | Port: {ws.port ?? 22}
-                  {ws.ssh_user ? ` | User: ${ws.ssh_user}` : ''}
-                  {ws.container_name ? ` | Container: ${ws.container_name}` : ''}
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <div>
+                    Host: {ws.host} | Port: {ws.port ?? 22}
+                    {ws.ssh_user ? ` | User: ${ws.ssh_user}` : ''}
+                    {ws.container_name ? ` | Container: ${ws.container_name}` : ''}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span>Shell:</span>
+                    <Select
+                      value={ws.login_shell || 'bash'}
+                      onValueChange={async (v) => {
+                        try {
+                          await workspaceAPI.update(ws.workspace_id, { login_shell: v });
+                          await mutateWorkspaces();
+                        } catch {
+                          alert('Failed to update shell');
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-6 text-xs w-20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="bash">bash</SelectItem>
+                        <SelectItem value="zsh">zsh</SelectItem>
+                        <SelectItem value="sh">sh</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               )}
             </div>

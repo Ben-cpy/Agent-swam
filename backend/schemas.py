@@ -60,10 +60,17 @@ class WorkspaceBase(BaseModel):
     port: Optional[int] = Field(22, ge=1, le=65535)
     ssh_user: Optional[str] = Field(None, max_length=100)
     container_name: Optional[str] = Field(None, max_length=200)
+    login_shell: str = Field("bash", max_length=50)
 
 
 class WorkspaceCreate(WorkspaceBase):
     runner_id: Optional[int] = None
+
+
+class WorkspaceUpdate(BaseModel):
+    display_name: Optional[str] = Field(None, max_length=200)
+    login_shell: Optional[str] = Field(None, max_length=50)
+    concurrency_limit: Optional[int] = Field(None, ge=1, le=20)
 
 
 class WorkspaceResponse(WorkspaceBase):

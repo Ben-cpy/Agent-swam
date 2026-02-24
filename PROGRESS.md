@@ -1,3 +1,9 @@
+* **SSH工作区支持 login_shell 配置（2026-02-24）**：
+  - 问题：SSH远程默认使用bash执行命令，但用户使用zsh且代理配置在`~/.zshrc`，导致claude/codex无法联网启动。
+  - 解决：在Workspace模型新增`login_shell`字段（默认`bash`，支持`bash/zsh/sh`）；zsh模式下用`zsh --login -c`代替bash执行，完整加载`.zshenv/.zprofile/.zshrc`；前端WorkspaceManager新增shell选择器，已有工作区可在列表中直接切换shell。
+  - 涉及文件：`models.py`, `schemas.py`, `database.py`, `executor.py`, `workspaces.py`, `frontend/lib/types.ts`, `frontend/lib/api.ts`, `frontend/components/WorkspaceManager.tsx`
+  - 避免复发：SSH场景下，代理等环境变量可能只在用户特定shell配置中，需通过`login_shell`确保正确的shell环境。
+
 * **SSH工作区全面修复 + 工作区健康检查（5297811，2026-02-24）**：
   - 问题1(P0): SSH工作区创建Task后立即失败，executor仅用 `workspace.host`（无端口/用户）建立SSH连接，导致连接目标错误；SSH任务未cd到工作目录，AI在未知目录执行。
   - 问题2(P0): SSH工作区的worktree被错误创建在Windows本地路径（`workspace.path`是`ssh://...`全路径），实际应在远程主机上创建。

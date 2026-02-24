@@ -164,6 +164,8 @@ async def init_db():
                 migration_sql.append("ALTER TABLE workspaces ADD COLUMN ssh_user VARCHAR(100)")
             if "container_name" not in existing_columns:
                 migration_sql.append("ALTER TABLE workspaces ADD COLUMN container_name VARCHAR(200)")
+            if "login_shell" not in existing_columns:
+                migration_sql.append("ALTER TABLE workspaces ADD COLUMN login_shell VARCHAR(50) NOT NULL DEFAULT 'bash'")
 
             for stmt in migration_sql:
                 await conn.execute(text(stmt))

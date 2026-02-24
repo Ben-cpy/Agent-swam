@@ -67,6 +67,7 @@ export interface Workspace {
   port?: number | null;
   ssh_user?: string | null;
   container_name?: string | null;
+  login_shell?: string | null;
   runner_id: number;
   concurrency_limit: number;
 }
@@ -79,6 +80,7 @@ export interface WorkspaceCreateInput {
   port?: number;
   ssh_user?: string;
   container_name?: string;
+  login_shell?: string;
   runner_id?: number;
 }
 

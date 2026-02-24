@@ -291,6 +291,7 @@ class TaskExecutor:
         ssh_port = workspace.port
         ssh_user = workspace.ssh_user
         container_name = workspace.container_name
+        login_shell = getattr(workspace, "login_shell", "bash") or "bash"
         workspace_type = workspace.workspace_type
 
         ssh_args = build_ssh_connection_args(ssh_host, ssh_port, ssh_user)
@@ -378,6 +379,7 @@ class TaskExecutor:
                 prompt=prompt_text,
                 tmux_session=tmux_session_name,
                 permission_mode=permission_mode,
+                login_shell=login_shell,
             )
         )
         return True
@@ -556,6 +558,7 @@ class TaskExecutor:
         prompt: str,
         tmux_session: str,
         permission_mode: Optional[str] = None,
+        login_shell: str = "bash",
     ):
         """Run a task on a remote SSH host using tmux for session persistence.
 
@@ -595,21 +598,26 @@ class TaskExecutor:
             else:
                 raise ValueError(f"Unknown backend: {backend}")
 
-            # Shell preamble: source nvm/bashrc so CLI tools on PATH, decode prompt into $PROMPT
-            shell_preamble = (
+            # Validate login_shell to a known safe value
+            _shell = login_shell if login_shell in ("bash", "zsh", "sh") else "bash"
+
+            # NVM loader used by all paths
+            _nvm_preamble = (
                 "source /root/.nvm/nvm.sh 2>/dev/null; "
                 "source ~/.nvm/nvm.sh 2>/dev/null; "
-                "source ~/.bashrc 2>/dev/null; "
-                f'PROMPT=$(echo {prompt_b64} | base64 -d); '
             )
 
             # Build the full command that runs inside the target environment.
-            # For SSH_CONTAINER: the outer script bash must NOT expand $PROMPT / $(...) before
-            # passing the string to docker exec — those should expand INSIDE the container.
-            # Fix: escape '$' → '\$' and '"' → '\"' so the outer bash treats them as literals;
-            # the container's bash then evaluates them correctly.
+            # For SSH_CONTAINER: always use bash inside the container (container likely doesn't
+            # have the user's personal shell config). The outer script still respects login_shell.
+            # For regular SSH: use login_shell so the user's proxy/PATH settings are loaded.
             if workspace_type == WorkspaceType.SSH_CONTAINER:
-                inner_cmd = f"{shell_preamble}cd {shlex.quote(remote_path)} && {ai_cmd}"
+                bash_preamble = (
+                    f"{_nvm_preamble}"
+                    "source ~/.bashrc 2>/dev/null; "
+                    f'PROMPT=$(echo {prompt_b64} | base64 -d); '
+                )
+                inner_cmd = f"{bash_preamble}cd {shlex.quote(remote_path)} && {ai_cmd}"
                 # Escape $ first (before "), then escape " to survive bash -c "..."
                 inner_cmd_escaped = inner_cmd.replace("$", r"\$").replace('"', '\\"')
                 exec_cmd = (
@@ -617,14 +625,31 @@ class TaskExecutor:
                     f"{shlex.quote(container_name or '')} "
                     f'bash -c "{inner_cmd_escaped}"'
                 )
+            elif _shell == "zsh":
+                # Export PROMPT from bash first, then run via `zsh --login` so all zsh startup
+                # files (.zshenv, .zprofile, .zshrc) are sourced — this picks up proxy settings.
+                # PROMPT is passed as an env-var; $PROMPT inside the single-quoted zsh body
+                # is expanded by zsh itself from its inherited environment.
+                _zsh_body = f"{_nvm_preamble}cd {shlex.quote(remote_path)} && {ai_cmd}"
+                _zsh_body_quoted = shlex.quote(_zsh_body)
+                exec_cmd = (
+                    f"export PROMPT=$(echo {prompt_b64} | base64 -d); "
+                    f"zsh --login -c {_zsh_body_quoted}"
+                )
             else:
-                # Non-container SSH: script runs directly on the host, $PROMPT expands naturally
+                # Default bash path: source ~/.bashrc for PATH/nvm setup
+                shell_preamble = (
+                    f"{_nvm_preamble}"
+                    "source ~/.bashrc 2>/dev/null; "
+                    f'PROMPT=$(echo {prompt_b64} | base64 -d); '
+                )
                 exec_cmd = f"{shell_preamble}cd {shlex.quote(remote_path)} && {ai_cmd}"
 
             # Write the full pipeline to a shell script file using base64 to avoid quoting hell.
             # The script content may contain arbitrary characters (single quotes, etc.) that would
             # break shell quoting if passed directly. Base64 encoding ensures safe transfer.
             # Use PIPESTATUS[0] to capture the exit code of the actual command, not tee.
+            # The outer wrapper always uses bash (required for PIPESTATUS array syntax).
             script_content = (
                 f"#!/bin/bash\n"
                 f"({exec_cmd}) 2>&1 | tee {shlex.quote(log_file)}\n"

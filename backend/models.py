@@ -89,6 +89,7 @@ class Workspace(Base):
     port = Column(Integer, nullable=True)
     ssh_user = Column(String(100), nullable=True)
     container_name = Column(String(200), nullable=True)
+    login_shell = Column(String(50), default="bash", nullable=False)
     runner_id = Column(Integer, ForeignKey("runners.runner_id"), nullable=False)
     concurrency_limit = Column(Integer, default=3, nullable=False)
 

@@ -79,6 +79,8 @@ export const taskAPI = {
 export const workspaceAPI = {
   list: () => apiClient.get<Workspace[]>('/workspaces'),
   create: (data: WorkspaceCreateInput) => apiClient.post<Workspace>('/workspaces', data),
+  update: (id: number, data: Partial<{ display_name: string; login_shell: string; concurrency_limit: number }>) =>
+    apiClient.patch<Workspace>(`/workspaces/${id}`, data),
   delete: (id: number) => apiClient.delete(`/workspaces/${id}`),
   resources: (id: number) => apiClient.get<WorkspaceResources>(`/workspaces/${id}/resources`),
   health: (id: number) => apiClient.get<WorkspaceHealth>(`/workspaces/${id}/health`),
