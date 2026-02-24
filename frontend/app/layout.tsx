@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
-import ToBeReviewNotifier from "@/components/ToBeReviewNotifier";
+import TaskCompletionNotifier from "@/components/ToBeReviewNotifier";
 
 export const metadata: Metadata = {
   title: "Agent Swarm",
@@ -16,7 +16,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
-        <ToBeReviewNotifier />
+        <TaskCompletionNotifier />
         <Navbar />
         <main className="container mx-auto px-4 py-8">
           {children}

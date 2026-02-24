@@ -166,3 +166,9 @@
   - 解决：在 `backend/core/scheduler.py` 新增 `_normalize_utc()`，统一将 SQLite 读出的 naive datetime 归一化为 UTC aware，再进行离线阈值比较。
   - 避免复发：凡是从 SQLite 读取并参与时间比较的字段，比较前必须显式做时区归一化，不能假设 ORM 返回值自带 tzinfo。
   - Commit: `20dadee`
+
+* **任务完成全局通知扩展（dba1e2d，2026-02-24）**：
+  - 问题：当前前端仅在任务进入 `TO_BE_REVIEW` 时弹窗，任务执行后若直接失败或已完成，用户切到其他浏览器标签页时容易错过状态变化。
+  - 解决：扩展 `frontend/components/ToBeReviewNotifier.tsx` 为“任务完成通知器”，在任务从非终态进入 `TO_BE_REVIEW/DONE/FAILED` 时触发系统通知；同步更新 `settings` 文案为“Notify when task run completes”；通知配置工具改为 completion 语义并保留旧 key/事件导出兼容。
+  - 避免复发：全局提醒逻辑应按“终态集合”建模，不应绑定单一状态；涉及配置项重命名时保留向后兼容导出，避免用户本地设置失效。
+  - Commit: `dba1e2d`
