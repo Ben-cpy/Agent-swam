@@ -144,3 +144,9 @@
   - 解决：`sessionmaker` 回退为 `expire_on_commit=False`；`tasks` 接口在 commit 后统一通过 `_load_task_with_run` 重新查询返回；merge/mark-done/delete 的 worktree 清理改为使用 `WorkspaceCleanupRef` 快照，避免 post-commit 访问过期 workspace；`executor` 在 commit 前缓存运行参数，避免后续读取潜在过期字段；`/api/models` 的 codex 默认模型调整为 `gpt-5.1-codex` 并修复 claude CLI 探测路径解析。
   - 避免复发：异步 SQLAlchemy 场景下，任何 commit 后逻辑都禁止直接依赖 ORM 实例状态；关键路径必须覆盖“HTTP 返回码与最终状态一致性”回归用例。
   - Commit: `7247290`
+
+* **SQLite 锁冲突与连接取消异常修复（a1aa45f，2026-02-24）**：
+  - 问题：高频 `GET /api/logs/{id}/stream` + 调度写入并发时出现 `(sqlite3.OperationalError) database is locked`，并伴随 `get_db` 结束阶段 `no active connection` / `CancelledError`。
+  - 解决：`backend/database.py` 移除请求级自动 `commit`，改为显式提交策略并在清理阶段安全 rollback/close；为 SQLite 连接启用 `WAL`、`busy_timeout=30000`、`timeout=30`；`backend/api/logs.py` 的 SSE 轮询改为每轮短生命周期 session，避免长连接持有事务。
+  - 避免复发：流式接口禁止复用长生命周期 DB session；SQLite 并发场景默认开启 WAL + busy_timeout；事务提交边界统一由写接口显式控制。
+  - Commit: `a1aa45f`
