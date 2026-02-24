@@ -97,6 +97,7 @@ async def create_workspace(
         port=workspace.port,
         ssh_user=workspace.ssh_user,
         container_name=workspace.container_name,
+        login_shell=workspace.login_shell or "bash",
         runner_id=runner.runner_id,
         concurrency_limit=await get_workspace_max_parallel(db),
     )

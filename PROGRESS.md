@@ -1,8 +1,10 @@
-* **SSH工作区支持 login_shell 配置（2026-02-24）**：
-  - 问题：SSH远程默认使用bash执行命令，但用户使用zsh且代理配置在`~/.zshrc`，导致claude/codex无法联网启动。
-  - 解决：在Workspace模型新增`login_shell`字段（默认`bash`，支持`bash/zsh/sh`）；zsh模式下用`zsh --login -c`代替bash执行，完整加载`.zshenv/.zprofile/.zshrc`；前端WorkspaceManager新增shell选择器，已有工作区可在列表中直接切换shell。
-  - 涉及文件：`models.py`, `schemas.py`, `database.py`, `executor.py`, `workspaces.py`, `frontend/lib/types.ts`, `frontend/lib/api.ts`, `frontend/components/WorkspaceManager.tsx`
-  - 避免复发：SSH场景下，代理等环境变量可能只在用户特定shell配置中，需通过`login_shell`确保正确的shell环境。
+* **SSH_CONTAINER + zsh 支持，修复多个关键bug（2026-02-24）**：
+  - Bug1：`SSH_CONTAINER`分支硬编码bash，忽略`login_shell`设置；修复：增加`if _shell == "zsh"`分支用`docker exec ... zsh --login -c`。
+  - Bug2：`create_workspace`端点未保存`login_shell`字段（漏写）；修复：`Workspace(..., login_shell=workspace.login_shell)`。
+  - Bug3：`$PROMPT`在zsh是内置提示符变量，`zsh --login -c`的startup文件会覆盖它；修复：改用`$_AITASK_PROMPT`变量名。
+  - Bug4：`zsh --login -c`是非交互shell，不自动source`.zshrc`；修复：在`-c`命令体开头显式`source ~/.zshrc 2>/dev/null`。
+  - Bug5：`--dangerously-skip-permissions`在root用户下被claude拒绝（容器默认root）；修复：SSH任务默认改用`--permission-mode dontAsk`，效果相同但允许root运行。
+  - 避免复发：容器任务几乎都是root；`--dangerously-skip-permissions`只适合非root；`dontAsk`是SSH/容器自动化任务的正确默认值。
 
 * **SSH工作区全面修复 + 工作区健康检查（5297811，2026-02-24）**：
   - 问题1(P0): SSH工作区创建Task后立即失败，executor仅用 `workspace.host`（无端口/用户）建立SSH连接，导致连接目标错误；SSH任务未cd到工作目录，AI在未知目录执行。

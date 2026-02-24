@@ -579,22 +579,30 @@ class TaskExecutor:
             prompt_b64 = base64.b64encode(prompt.encode()).decode()
             # prompt_b64 contains only [A-Za-z0-9+/=] – safe to embed in any quoting context
 
+            # Use a unique variable name to avoid conflicts with shell builtins.
+            # In zsh, $PROMPT is the prompt string (overwritten by .zshrc), so we must NOT
+            # use $PROMPT as our variable — we use $_AITASK_PROMPT instead.
+            _var = "_AITASK_PROMPT"
+
             if backend == "claude_code":
-                if not permission_mode or permission_mode == "bypassPermissions":
-                    perm_flag = "--dangerously-skip-permissions"
-                else:
+                if permission_mode and permission_mode != "bypassPermissions":
                     perm_flag = f"--permission-mode {permission_mode}"
-                # Claude accepts prompt as CLI argument; use double-quoted variable expansion
-                ai_cmd = f'claude -p --output-format stream-json {perm_flag} "$PROMPT"'
+                elif permission_mode == "bypassPermissions":
+                    # --dangerously-skip-permissions is blocked when running as root (common in
+                    # containers). Use --permission-mode dontAsk as equivalent for automation.
+                    perm_flag = "--permission-mode dontAsk"
+                else:
+                    # Default for SSH tasks: dontAsk avoids interactive prompts and works as root
+                    perm_flag = "--permission-mode dontAsk"
+                ai_cmd = f'claude -p --output-format stream-json {perm_flag} "${_var}"'
             elif backend == "codex_cli":
-                # Codex reads from stdin
                 ai_cmd = (
-                    f'printf "%s" "$PROMPT" | '
+                    f'printf "%s" "${_var}" | '
                     f"codex --ask-for-approval never exec --json --sandbox danger-full-access "
                     f"--cd {shlex.quote(remote_path)} -"
                 )
             elif backend == "copilot_cli":
-                ai_cmd = 'copilot --allow-all --no-color --no-alt-screen -p "$PROMPT"'
+                ai_cmd = f'copilot --allow-all --no-color --no-alt-screen -p "${_var}"'
             else:
                 raise ValueError(f"Unknown backend: {backend}")
 
@@ -608,40 +616,64 @@ class TaskExecutor:
             )
 
             # Build the full command that runs inside the target environment.
-            # For SSH_CONTAINER: always use bash inside the container (container likely doesn't
-            # have the user's personal shell config). The outer script still respects login_shell.
-            # For regular SSH: use login_shell so the user's proxy/PATH settings are loaded.
+            #
+            # Key design: for zsh we must decode _AITASK_PROMPT INSIDE the zsh -c body
+            # (after zsh startup files run), not before. If we set the var before `zsh --login`,
+            # .zshrc prompt-setting code may indirectly reset it. Embedding the b64 decode at
+            # the start of the -c body is safe because prompt_b64 is [A-Za-z0-9+/=] only.
+            #
+            # For bash/sh: decode in the preamble, then source rc file (order doesn't matter
+            # because bash's $PROMPT is not special and won't be overwritten by .bashrc).
+            # zsh startup file note:
+            # `zsh --login -c 'cmd'` is a login but NON-interactive shell.
+            # Zsh only sources .zshrc for interactive shells, so proxy/PATH set in .zshrc
+            # would NOT be loaded. Fix: explicitly source ~/.zshrc inside the -c body.
+            # Order: .zshenv + .zprofile (via --login) → .zshrc (explicit) → decode → run.
+
             if workspace_type == WorkspaceType.SSH_CONTAINER:
-                bash_preamble = (
-                    f"{_nvm_preamble}"
-                    "source ~/.bashrc 2>/dev/null; "
-                    f'PROMPT=$(echo {prompt_b64} | base64 -d); '
-                )
-                inner_cmd = f"{bash_preamble}cd {shlex.quote(remote_path)} && {ai_cmd}"
-                # Escape $ first (before "), then escape " to survive bash -c "..."
-                inner_cmd_escaped = inner_cmd.replace("$", r"\$").replace('"', '\\"')
-                exec_cmd = (
-                    f"docker exec -w {shlex.quote(remote_path)} "
-                    f"{shlex.quote(container_name or '')} "
-                    f'bash -c "{inner_cmd_escaped}"'
-                )
+                if _shell == "zsh":
+                    _zsh_body = (
+                        f"source ~/.zshrc 2>/dev/null; "
+                        f"{_var}=$(echo {prompt_b64} | base64 -d); "
+                        f"{_nvm_preamble}"
+                        f"cd {shlex.quote(remote_path)} && {ai_cmd}"
+                    )
+                    exec_cmd = (
+                        f"docker exec -w {shlex.quote(remote_path)} "
+                        f"{shlex.quote(container_name or '')} "
+                        f"zsh --login -c {shlex.quote(_zsh_body)}"
+                    )
+                else:
+                    # Bash path inside container: decode + source bashrc, then run.
+                    # Escape $ → \$ and " → \" so outer bash doesn't expand them before
+                    # passing the string to the inner docker exec bash -c.
+                    bash_preamble = (
+                        f"{_nvm_preamble}"
+                        f"source ~/.bashrc 2>/dev/null; "
+                        f"{_var}=$(echo {prompt_b64} | base64 -d); "
+                    )
+                    inner_cmd = f"{bash_preamble}cd {shlex.quote(remote_path)} && {ai_cmd}"
+                    inner_cmd_escaped = inner_cmd.replace("$", r"\$").replace('"', '\\"')
+                    exec_cmd = (
+                        f"docker exec -w {shlex.quote(remote_path)} "
+                        f"{shlex.quote(container_name or '')} "
+                        f'bash -c "{inner_cmd_escaped}"'
+                    )
             elif _shell == "zsh":
-                # Export PROMPT from bash first, then run via `zsh --login` so all zsh startup
-                # files (.zshenv, .zprofile, .zshrc) are sourced — this picks up proxy settings.
-                # PROMPT is passed as an env-var; $PROMPT inside the single-quoted zsh body
-                # is expanded by zsh itself from its inherited environment.
-                _zsh_body = f"{_nvm_preamble}cd {shlex.quote(remote_path)} && {ai_cmd}"
-                _zsh_body_quoted = shlex.quote(_zsh_body)
-                exec_cmd = (
-                    f"export PROMPT=$(echo {prompt_b64} | base64 -d); "
-                    f"zsh --login -c {_zsh_body_quoted}"
+                # Regular SSH + zsh: explicitly source .zshrc for proxy/PATH (non-interactive)
+                _zsh_body = (
+                    f"source ~/.zshrc 2>/dev/null; "
+                    f"{_var}=$(echo {prompt_b64} | base64 -d); "
+                    f"{_nvm_preamble}"
+                    f"cd {shlex.quote(remote_path)} && {ai_cmd}"
                 )
+                exec_cmd = f"zsh --login -c {shlex.quote(_zsh_body)}"
             else:
-                # Default bash path: source ~/.bashrc for PATH/nvm setup
+                # Default bash path: source ~/.bashrc first, then decode prompt
                 shell_preamble = (
                     f"{_nvm_preamble}"
-                    "source ~/.bashrc 2>/dev/null; "
-                    f'PROMPT=$(echo {prompt_b64} | base64 -d); '
+                    f"source ~/.bashrc 2>/dev/null; "
+                    f"{_var}=$(echo {prompt_b64} | base64 -d); "
                 )
                 exec_cmd = f"{shell_preamble}cd {shlex.quote(remote_path)} && {ai_cmd}"
 
