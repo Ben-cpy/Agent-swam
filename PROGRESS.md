@@ -150,3 +150,9 @@
   - 解决：`backend/database.py` 移除请求级自动 `commit`，改为显式提交策略并在清理阶段安全 rollback/close；为 SQLite 连接启用 `WAL`、`busy_timeout=30000`、`timeout=30`；`backend/api/logs.py` 的 SSE 轮询改为每轮短生命周期 session，避免长连接持有事务。
   - 避免复发：流式接口禁止复用长生命周期 DB session；SQLite 并发场景默认开启 WAL + busy_timeout；事务提交边界统一由写接口显式控制。
   - Commit: `a1aa45f`
+
+* **任务完成全局通知扩展（dba1e2d，2026-02-24）**：
+  - 问题：当前前端仅在任务进入 `TO_BE_REVIEW` 时弹窗，任务执行后若直接失败或已完成，用户切到其他浏览器标签页时容易错过状态变化。
+  - 解决：扩展 `frontend/components/ToBeReviewNotifier.tsx` 为“任务完成通知器”，在任务从非终态进入 `TO_BE_REVIEW/DONE/FAILED` 时触发系统通知；同步更新 `settings` 文案为“Notify when task run completes”；通知配置工具改为 completion 语义并保留旧 key/事件导出兼容。
+  - 避免复发：全局提醒逻辑应按“终态集合”建模，不应绑定单一状态；涉及配置项重命名时保留向后兼容导出，避免用户本地设置失效。
+  - Commit: `dba1e2d`
