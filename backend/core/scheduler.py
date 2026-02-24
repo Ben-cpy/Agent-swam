@@ -4,6 +4,7 @@ from models import Task, Workspace, Runner, TaskStatus, RunnerStatus
 from core.executor import TaskExecutor
 from core.task_reconciler import TaskReconciler
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from config import settings
 import asyncio
 import logging
@@ -11,7 +12,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def _normalize_utc(dt: datetime | None) -> datetime:
+def _normalize_utc(dt: Optional[datetime]) -> datetime:
     """Normalize sqlite-returned datetimes to timezone-aware UTC."""
     if dt is None:
         return datetime.min.replace(tzinfo=timezone.utc)
