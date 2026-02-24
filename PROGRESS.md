@@ -133,4 +133,14 @@
   - 避免复发：task worktree 合并前必须验证 `git worktree list`，确认分支名称后执行合并并清理资源。
   - Commit: `4971f1c`
 
+* **2026-02-23 回归排查（范围：`ede69ae..88983c3`）**：
+  - 问题：自 `65c5e4a` 引入 `expire_on_commit=True` 后，多个接口与调度路径在 commit 后继续访问 ORM 对象，触发 `MissingGreenlet`；`retry/merge/mark-done/delete` 出现“HTTP 500 但数据库状态已变更”。
+  - 解决：完成端到端复现（API + scheduler + 三后端 CLI 实测），确认根因集中在 post-commit 访问过期实例与清理阶段使用过期 `workspace`；并确认 `api/models` 中 codex 默认模型（`o4-mini`）在当前 ChatGPT 账号不可用会直接失败。
+  - 避免复发：若坚持 `expire_on_commit=True`，所有 commit 后返回值与清理逻辑必须改为“重新查询/冻结原始标量快照”；关键接口必须新增“返回码与最终状态一致性”回归测试；模型列表需从 CLI/账号能力动态探测，不得硬编码默认可用模型。
+  - Related Commit IDs: `65c5e4a`, `88983c3`
 
+* **任务生命周期 MissingGreenlet 回归修复（7247290，2026-02-24）**：
+  - 问题：任务调度与多个状态接口在 commit 后访问 ORM 对象，触发 `MissingGreenlet`，表现为任务卡 `RUNNING`、`retry/patch/mark-done/delete` 返回 500 但状态已落库。
+  - 解决：`sessionmaker` 回退为 `expire_on_commit=False`；`tasks` 接口在 commit 后统一通过 `_load_task_with_run` 重新查询返回；merge/mark-done/delete 的 worktree 清理改为使用 `WorkspaceCleanupRef` 快照，避免 post-commit 访问过期 workspace；`executor` 在 commit 前缓存运行参数，避免后续读取潜在过期字段；`/api/models` 的 codex 默认模型调整为 `gpt-5.1-codex` 并修复 claude CLI 探测路径解析。
+  - 避免复发：异步 SQLAlchemy 场景下，任何 commit 后逻辑都禁止直接依赖 ORM 实例状态；关键路径必须覆盖“HTTP 返回码与最终状态一致性”回归用例。
+  - Commit: `7247290`
