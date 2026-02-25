@@ -1,223 +1,148 @@
-* **六大功能迭代（2026-02-25）**：
-  - 功能1：Workspace 名称修改 - WorkspaceManager 增加内联铅笔编辑，调用已有 PATCH API。
-  - 功能2：GPU 显示修复 - 进度条改为显示显存利用率(%)，文字同时显示显存占比和 compute 利用率，解决 "0%" 恒定问题。
-  - 功能3：多 GPU 支持 - Workspace 增加 gpu_indices 字段，board 页面显示可点击 GPU 按钮，executor 自动设置 CUDA_VISIBLE_DEVICES 环境变量传给 adapter subprocess。
-  - 功能4：任务完成通知 - 新增 InAppToast 组件（固定右下角），浏览器权限被拒时仍能显示页内 toast；ToBeReviewNotifier 同时触发 browser notification 和 in-app toast。
-  - 功能5：Workspace 备忘录 - Workspace 增加 notes(Text)字段，新增 WorkspaceNotes 组件（半宽，自动保存），位于 GPU/MEM 下方、任务看板上方。
-  - 功能6：任务编号工作区内独立计数 - get_next_task_number 由 MAX(task.id) 改为 COUNT(task.id)，使编号从1开始在工作区内独立递增。
-  - DB 迁移：init_db() 中通过 safe ALTER TABLE 添加 gpu_indices 和 notes 列，不影响已有数据。
-  - 所有 7 个集成测试通过，前端 TypeScript 构建通过（同时修复 MentionTextarea.tsx 预存在 TS 错误）。
-  - Commit: `ba55ee5`
 
-* **SSH_CONTAINER + zsh 支持，修复多个关键bug（2026-02-24）**：
-  - Bug1：`SSH_CONTAINER`分支硬编码bash，忽略`login_shell`设置；修复：增加`if _shell == "zsh"`分支用`docker exec ... zsh --login -c`。
-  - Bug2：`create_workspace`端点未保存`login_shell`字段（漏写）；修复：`Workspace(..., login_shell=workspace.login_shell)`。
-  - Bug3：`$PROMPT`在zsh是内置提示符变量，`zsh --login -c`的startup文件会覆盖它；修复：改用`$_AITASK_PROMPT`变量名。
-  - Bug4：`zsh --login -c`是非交互shell，不自动source`.zshrc`；修复：在`-c`命令体开头显式`source ~/.zshrc 2>/dev/null`。
-  - Bug5：`--dangerously-skip-permissions`在root用户下被claude拒绝（容器默认root）；修复：SSH任务默认改用`--permission-mode dontAsk`，效果相同但允许root运行。
-  - 避免复发：容器任务几乎都是root；`--dangerously-skip-permissions`只适合非root；`dontAsk`是SSH/容器自动化任务的正确默认值。
-  - Commit: `07a22c1`
 
-* **SSH工作区全面修复 + 工作区健康检查（5297811，2026-02-24）**：
-  - 问题1(P0): SSH工作区创建Task后立即失败，executor仅用 `workspace.host`（无端口/用户）建立SSH连接，导致连接目标错误；SSH任务未cd到工作目录，AI在未知目录执行。
-  - 问题2(P0): SSH工作区的worktree被错误创建在Windows本地路径（`workspace.path`是`ssh://...`全路径），实际应在远程主机上创建。
-  - 问题3(P1): SSH+Container工作区未调用docker exec，命令在SSH主机上直接执行而非容器内。
-  - 解决：新增 `backend/core/ssh_utils.py` 提取三个共享工具函数：`build_ssh_connection_args`（包含端口/用户/BatchMode）、`extract_remote_path`（从canonical URL提取远程路径）、`run_ssh_command`；重构 `executor.py` 的SSH任务流程：先SSH检测远程分支→SSH创建远程git worktree→SSH启动tmux，AI命令使用正确的`cd path && cmd`或`docker exec -w path container bash -c cmd`；修复 `workspaces.py` 资源监控和文件列表的SSH调用使用正确连接参数。
-  - 新增：`GET /api/workspaces/{id}/health` 端点，返回`{reachable, is_git, message}`；任务创建前校验工作区是否为git仓库，非git仓库直接返回400；前端新增 `WorkspaceHealthBadge` 组件（绿✓/黄⚠/红✗图标+tooltip），集成到WorkspaceManager、WorkspaceCard、工作区看板页面。
-  - 避免复发：SSH命令构建必须通过 `build_ssh_connection_args` 统一处理；`workspace.path` 是canonical URL不是本地路径，SSH场景下需用 `extract_remote_path` 提取实际路径。
-  - Commit: `5297811`
+++++++
+# 阶段性总结
+### 1) 功能迭代（2026-02-25）
 
-* **7个Bug批量修复（待commit，2026-02-24）**：
-  - Bug1(P0): scheduler.py `_update_heartbeat` 先更新 `heartbeat_at` 再判断阈值，永远不会将 Runner 标记 OFFLINE。修复：阈值判断移到更新之前，且只更新本地 runner 的心跳（按 `settings.runner_env` 过滤）。
-  - Bug2(P0): LogStream.tsx SSE 事件 `data.content` 为多行文本时，原 `parseLine/parseCopilotLine` 只处理单行，改为 `processRawLogs(data.content, backend)` 逐行切割解析。
-  - Bug3(P1): workspaces.py Windows 11 21H2+ 已移除 `wmic`，改用 `PowerShell Get-CimInstance Win32_OperatingSystem | ConvertTo-Json`，同步更新 `_parse_memory_windows` 解析 JSON 格式。
-  - Bug4(P1): executor.py `_cancelled_task_ids` 为类变量存在设计缺陷，改为模块级单例 `set`（保留跨实例通讯语义，消除类变量滥用）。
-  - Bug5(P2): executor.py SSH 任务结束后 `finally` 块增加 `ssh host rm -f /tmp/{tmux_session}.log` 清理临时日志。
-  - Bug6(P3): tasks.py `next_number` 由 `COUNT(*)` 改为 `MAX(id)+1`，避免删除任务后建议标题重复。
-  - Bug7(P3): TaskCard.tsx 新增 `onRefreshed` prop，`handleMarkDone` 改用 `onRefreshed ?? onDeleted`，语义正确，向后兼容。
-  - 运行 `commit.sh` 完成提交。
+完成一批面向可用性与运维效率的改进：
 
-* **异步 SQLAlchemy 数据库稳定性修复（65c5e4a，2026-02-23）**：
-  - 问题：高并发场景下频繁出现 "Database is locked" 错误与 "detached instance ... is not bound to any database session" 异常，数据库操作不稳定。
-  - 根本原因：①Task.run relationship 的 `post_update=True` 在异步环境中导致额外 UPDATE 和竞态条件；②`expire_on_commit=False` 与 `post_update=True` 组合引发对象分离问题；③三个关键函数（continue_task/merge_task/delete_task）在 commit 后使用可能分离的对象。
-  - 解决：①移除 `post_update=True` 从 models.py 的 Task.run relationship；②改为 `expire_on_commit=True` 以强制正确的对象生命周期管理；③统一 session 使用模式：commit 前保存所有需要的属性值，commit 后仅使用保存的值；④移除所有不必要的 `db.refresh()` 调用（create_task/retry_task/_update_task/continue_task/mark_task_done 共 5 处）；⑤merge_task/delete_task 在 commit 前保存 worktree_path/workspace，commit 后调用 _remove_worktree 时仅使用保存值。
-  - 避免复发：异步 ORM 操作必须遵循"获取所需值→commit→使用保存值"的严格顺序，禁止 commit 后访问任何 ORM 对象属性；新增 session 管理改动时强制 review session 生命周期。
-  - Commit: `65c5e4a`
+* Workspace 名称内联编辑、备忘录（notes）支持、任务编号按工作区独立递增
+* GPU 展示修复（显存利用率/计算利用率显示更准确）
+* 多 GPU 支持（`gpu_indices` + `CUDA_VISIBLE_DEVICES` 透传）
+* 任务完成通知增强（浏览器通知 + 页内 toast 双通道，权限被拒时仍可提醒）
 
-* **Merge 流程健壮性补强（11199d3，2026-02-21）**：
-  - 问题：用户在点击任务 Merge 时仍会遇到高频失败，包括基线 workspace/任务 worktree 存在未提交改动、历史 merge 残留状态阻塞、worktree 路径失效后无法按分支继续合并，以及 AI 冲突兜底仅按退出码判定导致误报失败。
-  - 解决：重构 backend/api/tasks.py 合并链路，新增“合并前自动恢复”与“可选 worktree”机制：先自动 merge --abort 清理遗留状态；对 task/workspace 两侧未提交改动自动提交后再 merge；worktree 缺失时允许直接按 task 分支合并；冲突时仅触发一次 AI fallback，并在 AI 后按 Git 实际状态（unmerged files 与 MERGE_HEAD）做最终判定。同步在 backend/core/adapters/codex.py 为非交互执行增加 --ask-for-approval never，避免自动兜底卡在审批提示。新增 tests/test_merge_robust.py 回归场景覆盖基线脏工作区自动提交与无 worktree 路径分支合并。
-  - 避免复发：Merge 入口必须遵循“规则优先、AI兜底、状态可恢复”的统一流程，且每次改动都要覆盖真实失败边界（base dirty/worktree missing/stale MERGE_HEAD）并回归验证。
-  - Commit: `11199d3`
+**关键教训**
 
-* **任务标题修改 405 修复（66310ee，2026-02-21）**：
-  - 问题：任务详情页保存标题时报错 `Failed to update title: Method Not Allowed`，`PATCH /api/tasks/{id}` 在部分环境存在方法受限导致失败。
-  - 解决：后端新增 `POST /api/tasks/{id}/rename` 复用同一更新逻辑；前端 `taskAPI.updateTitle` 改为优先调用 POST，并在后端尚未升级时对 404 回退到原 PATCH。
-  - 避免复发：对关键写操作提供“兼容方法通道”（如 POST action endpoint）与客户端回退策略，避免被网关/代理的 HTTP 方法限制卡死核心功能。
-  - Commit: `66310ee`
-* **task-1 合并入主分支（7848387，2026-02-21）**：
-  - 问题：在 `main` 合并 `task-1` 时，`PROGRESS.md` 出现并行更新冲突，阻塞自动合并。
-  - 解决：手动解决 `PROGRESS.md` 冲突，保留 `main` 的 CI/CD 记录与 `task-1` 的通知开关记录后完成 merge commit `7848387`。
-  - 避免复发：并行分支持续写同一沉淀文档时，合并前优先做一次 `rebase main` 或先拆分独立条目，降低文本冲突概率。
-  - Commit: `7848387`
+* 关键状态提醒不能依赖单一通知通道，必须有浏览器通知 + 应用内兜底。
+* UI 显示指标要明确区分不同含义（显存 vs compute），避免“看起来正常但信息误导”。
 
-* **Settings 通知开关（9411478，2026-02-21）**：
-  - 问题：`TO_BE_REVIEW` 全局弹窗默认始终开启，缺少用户侧开关，无法按偏好关闭通知。
-  - 解决：新增 `frontend/lib/reviewNotificationSettings.ts` 管理本地持久化开关；`frontend/app/settings/page.tsx` 增加通知开关；`frontend/components/ToBeReviewNotifier.tsx` 接入开关监听，关闭时停止轮询与弹窗，开启后即时生效。
-  - 避免复发：对全局提醒类能力默认提供显式开关，并让通知触发组件直接订阅该配置，避免“设置页改了但运行态不生效”。
-  - Commit: `9411478`
-* **Review 通知漏报边界修复（1cea57b，2026-02-21）**：
-  - 问题：如果任务在两次轮询之间快速完成，下一次拉取时可能“首次出现即 TO_BE_REVIEW”，原逻辑会因为缺少上一状态而不弹窗。
-  - 解决：在 `frontend/components/ToBeReviewNotifier.tsx` 调整跃迁判断：首次观察到任务且当前为 `TO_BE_REVIEW` 也触发通知。
-  - 避免复发：状态变化提醒逻辑需覆盖“首次观测态”场景，避免仅依赖严格的前后态对比。
-  - Commit: `1cea57b`
-* **TO_BE_REVIEW 全局弹窗通知（56a0913，2026-02-21）**：
-  - 问题：任务进入 `TO_BE_REVIEW` 后，只有在看板/详情页内才能看到状态变化，切到其他站内页面时容易错过待审核任务。
-  - 解决：新增 `frontend/components/ToBeReviewNotifier.tsx` 全局客户端通知器并挂载到 `frontend/app/layout.tsx`；通过 SWR 轮询任务列表，检测任务状态由非 `TO_BE_REVIEW` 跃迁到 `TO_BE_REVIEW` 时触发浏览器 Notification 弹窗（`silent: true`，点击跳转任务详情）。
-  - 避免复发：对关键状态流转（如待审核、失败、人工介入）统一提供跨页面可见提醒，避免仅依赖当前页面局部 UI 提示。
-  - Commit: `56a0913`
-* **失败任务重试反馈与按钮样式优化（7059f9a，2026-02-21）**：
-  - 问题：任务详情页中 FAILED 任务点击 `Retry Task` 后会触发重试，但界面没有成功反馈，且按钮默认黑色视觉不匹配当前页面风格。
-  - 解决：在 `frontend/app/tasks/[id]/page.tsx` 新增 3 秒自动消失的重试成功提示条（`Task re-queued. Execution will start shortly.`），并将 `Retry Task` 按钮改为 GitHub 风格蓝色（`#0969da`，hover `#0860ca`），同时补充 `Retrying...` 加载文案。
-  - 避免复发：对"状态变更触发后台动作"的按钮统一增加即时 UI 反馈（toast/提示条/状态文案），避免用户误判点击无效。
-  - Commit: `7059f9a`
-* **Retry 语义加固与回归脚本（2b7cd28，2026-02-21）**：
-  - 问题：用户反馈 FAILED 任务点击 Retry 后仍可能出现"新任务/新 worktree"心智负担，需要进一步加固"原任务原地重试"语义并增加可回归验证。
-  - 解决：后端在 `retry/continue` 两个入口统一清理 `run_id` 并写入 in-place 重排队日志；新增 `tests/test_retry_inplace.py`，验证 retry 后任务数量不增加、`id/title/worktree_path` 不变、状态 `FAILED -> TODO`。
-  - 避免复发：涉及状态机行为（重试/继续）必须配套最小回归脚本，至少覆盖"实体不复制、上下文不丢失、状态可观测"三项断言。
-  - Commit: `2b7cd28`
-* **Copilot 任务卡队列修复（396fadd，2026-02-20）**：
-  - 问题：copilot_cli 任务持续停留在 TODO/Queue，scheduler 周期性告警 “Runner does not support backend copilot_cli”。
-  - 解决：LocalRunnerAgent 的 runner capabilities 改为从 BackendType 枚举动态生成，确保包含 copilot_cli；同时给 scheduler 增加“不支持 backend”告警去重，避免每轮刷屏。
-  - 避免复发：新增 backend 时统一从单一枚举源派生能力列表，禁止在 runner 注册里写死字符串常量。
-* **task-14 合并入主分支（447b446，2026-02-20）**：  
-  - 问题：`task-14` 与 `main` 已分叉，需把“一键合并”功能安全并入主线。  
-  - 解决：在 `main` worktree 执行 `git merge --no-ff task-14`，完成后端 merge API 与前端按钮改动合入，生成 merge commit `447b446`。  
-  - 避免复发：后续同类任务统一先检查 `git worktree list` 和分叉计数，再在目标分支所在 worktree 完成合并。  
-* **Task 内一键 Merge（b144ffa，2026-02-20）**：  
-  - 问题：每次任务完成后都要手动重复输入“把当前 worktree 合并回主分支”的提示词，流程冗余且易漏。  
-  - 解决：新增后端 POST /api/tasks/{id}/merge（固定 merge prompt + 复用 continue 重入机制，保持原 worktree），并在任务详情页新增 Merge to Base 按钮一键触发。  
-  - 避免复发：把“高频固定动作”沉淀为显式 API + UI 按钮，不再依赖人工重复输入 prompt。  
-* **2026-02-16 Code Review（0ceb2e8）**：指出 M1 高风险缺陷（后台任务复用请求级 DB session、取消状态竞态、错误枚举不匹配），给出具体整改点与测试建议，未改代码。
-* **M1 问题修复（09319ff）**：一次性修复 6 个阻塞项：后台独立 DB session + 取消保护、修正退出码映射、强化 SQLite FK 与 API 校验、去硬编码日志 URL、修前端类型/调用与 lint 问题；新增 `tests/verify_m1_fixes.py` 并要求进 CI。
-* **启动与工作区清理（e7a22bf）**：重写 README 为最小启动手册；`setup_env.sh` 去硬编码、支持非交互与 ensurepip 修复；新增一键清理脚本；测试脚本兼容 Windows 文件锁重试。
-* **工作区管理（82c4448）**：新增 UI/后端支持工作区增删查，扩展类型为 `local/ssh/ssh_container`，完善校验与路径规范化；修复枚举存储不一致导致的 500（改为 value 持久化并兼容旧值）；补 SQLite 迁移。
-* **Windows Codex 与任务删除（269a09e）**：解决 WinError2（不再依赖 PowerShell alias，改为解析真实可执行文件路径如 `.cmd`）；补齐任务删除 API 与前端按钮。
-* **M3 配额监控（2026-02-17，pending）**：实现配额/用量采集与“配额耗尽即停止”：新增 QuotaState、`FAILED_QUOTA`、`usage_json`；两适配器解析流事件获取用量并识别 quota/rate-limit；调度前检查配额；提供 `/api/quota` 与前端告警/管理/重试。
-* **Velvet 简化与 Worktree 隔离（8831cad）**：认为状态/页面过复杂，**回退简化**：移除配额/runner/usage 页面与路由；任务状态统一为 `TODO/RUNNING/DONE/FAILED` 并迁移旧状态；引入每任务 `branch_name/worktree_path`，执行前自动建 git worktree 隔离；UI 回到 4 列看板并展示 worktree 信息。
-* **verl 三特性并行开发（7a5a073，2026-02-18）**：用 3 个 git worktree 并行实现 3 个 Feature，全部指标验证通过后合并回 main：
-  - `feature/model-selection`（3a0d149）：`/api/models` 端点+10分钟缓存；Task 新增 `model` 列；ClaudeCodeAdapter/CodexAdapter 透传 `--model` 参数；前端 TaskForm 动态 model 下拉框。
-  - `feature/usage-aggregation`（bebd636）：`/api/usage` 端点聚合 Run.usage_json；同时支持 claude_code（cost_usd）和 codex_cli（total_tokens）；前端 UsageSummary 卡片置于 Dashboard 顶部，SWR 30s 刷新。
-  - `feature/tmux-terminal`（3be1bec）：Run 新增 `tmux_session` 列；SSH workspace 任务包裹 tmux 执行；`/api/tasks/{id}/terminal` WebSocket 端点（asyncssh）实现 PTY 双向中继；前端 `/tasks/[id]/terminal` xterm.js 终端页；任务详情页新增"Open Terminal"按钮（仅 SSH workspace 可见）。
-* **Review 状态 + 直接合并 + 全局并发设置（11be924，2026-02-20）**：
-  - 问题：任务完成即 DONE，缺少人工 Review 阶段；Merge 依赖 AI 二次执行；调度仍按串行导致 worktree 并行能力未利用。
-  - 解决：新增 TO_BE_REVIEW 状态流（RUNNING 成功后进入 Review）；POST /api/tasks/{id}/merge 改为后端直接 git merge + 清理 worktree；新增 /api/settings 与前端 /settings 管理全局 workspace_max_parallel（默认 3），并立即覆盖 runner/workspace 并发；scheduler 按 workspace/runner 限额并行派发。
-  - 避免复发：涉及状态机与调度策略升级时，必须同步检查后端枚举、接口约束、前端状态映射和可见性条件，避免只改单点导致流程断裂。
-* **长 Prompt 任务失败修复（31d33e7，2026-02-20）**：
-  - 问题：Windows 下将超长 prompt 作为命令行参数传给 claude/codex 时，任务会快速失败（命令行长度上限风险）。
-  - 解决：后端适配器改为通过 stdin 传入 prompt（codex exec - + claude --input-format text），并在前后端统一 prompt_max_chars=65536 校验与计数提示。
-  - 避免复发：后续对大文本输入统一采用 stdin/文件通道，不再依赖命令行参数承载长内容；长度阈值统一由配置常量管理。
-* **Execution Logs 自动滚动打断操作修复（729ac03，2026-02-20）**：
-  - 问题：任务详情页日志持续更新时，组件每次通过 `scrollIntoView` 触发整页滚动，导致页面焦点频繁被拖回日志区，影响用户在主界面操作。
-  - 解决：`LogStream` 改为监听日志容器滚动位置，仅在“用户当前接近底部”时自动跟随，且只滚动日志容器自身（`scrollTop`），不再驱动页面滚动。
-  - 避免复发：流式日志/聊天窗口类组件统一采用“sticky-to-bottom”策略，不直接在更新时调用可能影响整页滚动的 `scrollIntoView`。
-* **Windows CLI shell 优先级回退（5777682，2026-02-20）**：
-  - 问题：在 Windows 环境下，CLI 执行链路缺少显式 shell 优先级策略，用户希望固定优先使用 Git Bash，并在不可用时自动回退。
-  - 解决：在 `backend/core/adapters/cli_resolver.py` 新增 shell 探测与命令变体构建（git-bash > cmd > powershell），并在 `BackendAdapter.run_subprocess` 中按优先级尝试执行；命令不可用时自动回退，最终保留 direct exec 兜底；`claude/codex/copilot` 适配器均接入 `cli_name`。
-  - 避免复发：Windows 端新增 CLI 或调整执行器时，统一走同一套 shell-priority 解析逻辑，禁止在各适配器内各自实现 shell 选择。
-  - Commit: `5777682`
-* **FAILED 任务重试复用同一 Task/Worktree（62bcfdd，2026-02-20）**：
-  - 问题：任务详情页点击 Retry 会创建新任务（标题追加 Retry）并新建 worktree，导致同一失败任务上下文被拆分。
-  - 解决：将 `POST /api/tasks/{id}/retry` 改为原任务原地重排队（`FAILED -> TODO`），复用既有 `worktree_path`，且不再创建新 Task；前端 Retry 改为留在当前任务页并 `mutate()` 刷新状态。
-  - 避免复发：涉及“重试”语义时优先定义为状态机流转而非复制实体；仅在明确需要历史分叉时才创建新任务。
-* **task-8 合并入主分支（0747361，2026-02-20）**：
-  - 问题：`task-8` 合并到 `main` 时在 `PROGRESS.md` 出现内容冲突。
-  - 解决：手动合并冲突块，保留双方有效记录后完成 merge commit。
-  - 避免复发：并行分支都维护同一沉淀文档时，合并前先 rebase 或提前拆分独立条目，降低冲突概率。
-  - Commit: `0747361`
+---
 
-* **Windows 终端优先级鲁棒性增强（46b4fa0，2026-02-21）**：
-  - 问题：用户反馈在 Windows 下 `codex`、`copilot` 运行时偏向 PowerShell，希望默认优先 `git bash > cmd > powershell`，并在不同安装路径下保持稳定回退。
-  - 解决：增强 `backend/core/adapters/cli_resolver.py`：扩展 Git Bash 探测路径（Program Files/LocalAppData/PATH/环境变量）、去重校验并统一优先级；`claude/codex/copilot` 适配器统一注入 `COMSPEC/SHELL` 覆盖，`Claude` 额外注入 `CLAUDE_CODE_SHELL`；`Codex` 额外传入 `shell_environment_policy.set.*` 作为 shell tool 环境提示。
-  - 避免复发：Windows shell 选择统一走 `cli_resolver` 单一入口，新增 CLI/适配器时禁止各自硬编码 shell 逻辑；任何变更都先验证当前机型解析顺序输出。
-  - Commit: `46b4fa0`
+### 2) SSH / SSH_CONTAINER 执行链路稳定性修复（2026-02-24 ~ 2026-02-25）
 
-* **CI/CD 基线与交付产物流水线（cb78637，2026-02-21）**：
-  - 问题：仓库缺少 GitHub 端自动质量闸门，新改动可能在合并后才暴露后端回归或前端构建问题；同时无主分支自动交付产物。
-  - 解决：新增 `.github/workflows/ci-cd.yml`，CI 覆盖后端（ubuntu/windows + Python 3.9、依赖检查、编译、回归脚本）和前端（Node 20、lint、build）；CD 在 `main` push 且 CI 通过后自动打包并上传 delivery artifact。补充 `CI_CD.md` 说明触发条件、检查项和分支保护建议。
-  - 避免复发：后续新增功能必须先补对应测试/构建命令并纳入 workflow；合并策略统一依赖必过检查，禁止绕过 CI 直接入主分支。
-  - Commit: `cb78637`
+系统性修复了 SSH/容器任务“创建即失败、路径错误、命令执行在错误环境、日志无输出”等问题，包括：
 
-* **空悬 Task 自动修复与 Worktree 健壮性增强（05420fd，2026-02-21）**：
-  - 问题：用户在文件管理器/CMD 手工删除 worktree 或外部完成分支合并后，DB 仍保留旧 `worktree_path` 与 `TO_BE_REVIEW` 任务，前端会出现空悬 task；同时执行器会把存在但非 git worktree 的目录误判为可复用。
-  - 解决：新增 `backend/core/task_reconciler.py` 并接入 scheduler 每轮巡检，自动清理失效 worktree 引用、执行 `git worktree prune`、并将已外部合并/分支缺失的 `TO_BE_REVIEW` 任务自动闭环为 `DONE`；同时强化 `executor._create_worktree`，仅复用有效 git worktree，空目录自动清理，异常路径自动回退到恢复路径；`merge` 接口改为在 worktree 缺失时仍可按分支完成合并，并在清理阶段补 `worktree prune`。
-  - 避免复发：所有路径存在即复用的逻辑必须先做 git worktree 有效性校验；状态机需定期与 Git 真实状态对账，避免仅依赖 DB 字段导致长期空悬。
-  - Commit: `05420fd`
+* 统一 SSH 连接参数构建（用户/端口/BatchMode）
+* 正确区分 canonical URL 与远程真实路径（避免把 `ssh://...` 当本地路径）
+* SSH+Container 命令必须通过 `docker exec` 在容器内执行
+* 修复 zsh 支持（`login_shell` 保存、`.zshrc` source、变量名冲突）
+* 修复 codex 参数兼容（模型参数传递、审批参数变更、代理配置在非交互 shell 生效）
+* 修复 SSH 日志实时输出（避免 `tee` 缓冲；`tail -F` 处理竞态）
+* 新增工作区健康检查接口与前端健康状态徽章（创建任务前先校验仓库可用性）
 
-* **Claude/Codex 超长单行日志触发 LimitOverrunError 修复（76ef41c，2026-02-21）**：
-  - 问题：`asyncio` 的 `StreamReader` 默认单行限制约 64KB，Claude Code stream-json 在大输出场景会产生超长单行，导致 `LimitOverrunError: Separator is found, but chunk is longer than limit`，任务中断。
-  - 解决：在 `backend/core/adapters/base.py` 的 `asyncio.create_subprocess_exec` 增加 `limit=10 * 1024 * 1024`，将 subprocess stdout 的 `StreamReader` 上限提升到 10MB。
-  - 避免复发：所有基于 `readline()` 的流式子进程读取必须显式设置合理 `limit`，并在接入新 CLI/新输出协议时评估单行峰值大小后统一参数。
-  - Commit: `76ef41c`
+**关键教训**
 
-* **任务审批状态回归修复（22438ec，2026-02-21）**：
-  - 问题：为修复空悬 task 引入的 reconciler 自动闭环逻辑，导致新任务在未审批场景可能被自动从 `TO_BE_REVIEW` 置为 `DONE`，并触发 worktree/分支清理，出现”未合并主干却被关单”的高风险行为。
-  - 解决：移除 `backend/core/task_reconciler.py` 中 `TO_BE_REVIEW -> DONE` 自动状态推进与自动删分支逻辑，只保留失效 worktree 引用清理；新增 `POST /api/tasks/{id}/mark-done` 手动完结接口；前端任务详情页新增 `Mark as Done` 按钮；回归脚本更新为”reconciler 不自动关单”，并新增 `tests/test_mark_done.py`。
-  - 避免复发：reconciler 只能做”引用修复/一致性修复”，不得做审批语义状态推进；任何会把任务置为 `DONE` 的路径必须是显式用户动作（merge 或 mark done），并配套回归测试覆盖。
-  - Commit: `22438ec`
+* **SSH 命令构建必须集中封装**，不能在不同模块各自拼接（端口/用户/路径/容器层级极易漏）。
+* **非交互 shell ≠ 交互 shell**：alias、profile、`~/.zshrc`、代理配置都可能不生效，必须显式处理。
+* **双层 shell（SSH + docker exec）必须严控转义**；动态内容优先用 base64/临时脚本，避免引号地狱与变量提前展开。
+* **实时日志场景不要用 `tee` 写文件**（块缓冲会让前端“看起来卡死”）；`tail -F` 比 `tail -f` 更稳健。
 
-* **task-7 数据库稳定性修复合并入主分支（4971f1c，2026-02-23）**：
-  - 问题：task-7 worktree 包含 3 个关键数据库稳定性修复提交，需要合并入主分支。
-  - 解决：在主分支执行 `git merge worktree-task-7-db-fixes --no-ff`，包含：异步 SQLAlchemy 稳定性修复、`post_update=True` 移除、session 生命周期正确化、数据库锁定竞态条件修复；同时引入 `DATABASE_FIX_SUMMARY.md` 文档；合并无冲突，生成 merge commit 后清理 worktree。
-  - 避免复发：task worktree 合并前必须验证 `git worktree list`，确认分支名称后执行合并并清理资源。
-  - Commit: `4971f1c`
+---
 
-* **2026-02-23 回归排查（范围：`ede69ae..88983c3`）**：
-  - 问题：自 `65c5e4a` 引入 `expire_on_commit=True` 后，多个接口与调度路径在 commit 后继续访问 ORM 对象，触发 `MissingGreenlet`；`retry/merge/mark-done/delete` 出现“HTTP 500 但数据库状态已变更”。
-  - 解决：完成端到端复现（API + scheduler + 三后端 CLI 实测），确认根因集中在 post-commit 访问过期实例与清理阶段使用过期 `workspace`；并确认 `api/models` 中 codex 默认模型（`o4-mini`）在当前 ChatGPT 账号不可用会直接失败。
-  - 避免复发：若坚持 `expire_on_commit=True`，所有 commit 后返回值与清理逻辑必须改为“重新查询/冻结原始标量快照”；关键接口必须新增“返回码与最终状态一致性”回归测试；模型列表需从 CLI/账号能力动态探测，不得硬编码默认可用模型。
-  - Related Commit IDs: `65c5e4a`, `88983c3`
+### 3) 数据库与异步 ORM 稳定性修复（2026-02-23 ~ 2026-02-24）
 
-* **任务生命周期 MissingGreenlet 回归修复（7247290，2026-02-24）**：
-  - 问题：任务调度与多个状态接口在 commit 后访问 ORM 对象，触发 `MissingGreenlet`，表现为任务卡 `RUNNING`、`retry/patch/mark-done/delete` 返回 500 但状态已落库。
-  - 解决：`sessionmaker` 回退为 `expire_on_commit=False`；`tasks` 接口在 commit 后统一通过 `_load_task_with_run` 重新查询返回；merge/mark-done/delete 的 worktree 清理改为使用 `WorkspaceCleanupRef` 快照，避免 post-commit 访问过期 workspace；`executor` 在 commit 前缓存运行参数，避免后续读取潜在过期字段；`/api/models` 的 codex 默认模型调整为 `gpt-5.1-codex` 并修复 claude CLI 探测路径解析。
-  - 避免复发：异步 SQLAlchemy 场景下，任何 commit 后逻辑都禁止直接依赖 ORM 实例状态；关键路径必须覆盖“HTTP 返回码与最终状态一致性”回归用例。
-  - Commit: `7247290`
+修复高并发下 SQLite 与异步 SQLAlchemy 引起的多类问题：
 
-* **SQLite 锁冲突与连接取消异常修复（a1aa45f，2026-02-24）**：
-  - 问题：高频 `GET /api/logs/{id}/stream` + 调度写入并发时出现 `(sqlite3.OperationalError) database is locked`，并伴随 `get_db` 结束阶段 `no active connection` / `CancelledError`。
-  - 解决：`backend/database.py` 移除请求级自动 `commit`，改为显式提交策略并在清理阶段安全 rollback/close；为 SQLite 连接启用 `WAL`、`busy_timeout=30000`、`timeout=30`；`backend/api/logs.py` 的 SSE 轮询改为每轮短生命周期 session，避免长连接持有事务。
-  - 避免复发：流式接口禁止复用长生命周期 DB session；SQLite 并发场景默认开启 WAL + busy_timeout；事务提交边界统一由写接口显式控制。
-  - Commit: `a1aa45f`
+* `database is locked`、`MissingGreenlet`、detached instance、HTTP 500 但状态已落库
+* 调整会话生命周期与 commit 后返回逻辑
+* 流式日志接口改为短生命周期 session，避免长连接持有事务
+* SQLite 开启 WAL / busy_timeout，并改为显式提交策略
+* 修复 Runner 心跳时间比较中的 naive/aware datetime 混用问题
 
-* **Runner 心跳时区比较异常修复（20dadee，2026-02-24）**：
-  - 问题：`RunnerHeartbeat._update_heartbeat()` 在比较 `runner.heartbeat_at < threshold` 时抛出 `TypeError: can't compare offset-naive and offset-aware datetimes`，导致心跳循环持续报错。
-  - 解决：在 `backend/core/scheduler.py` 新增 `_normalize_utc()`，统一将 SQLite 读出的 naive datetime 归一化为 UTC aware，再进行离线阈值比较。
-  - 避免复发：凡是从 SQLite 读取并参与时间比较的字段，比较前必须显式做时区归一化，不能假设 ORM 返回值自带 tzinfo。
-  - Commit: `20dadee`
+**关键教训**
 
-* **SSH+Container 任务执行链路修复（2026-02-24）**：
-  - 问题：SSH/SSH_CONTAINER 工作区的任务 0.4 秒即失败，worktree 路径错误（Windows 路径）；tmux 命令因单引号嵌套失败；codex 使用错误的 `-p` profile 参数；`$PROMPT` 变量被外层脚本 bash 提前展开导致 `bash: the: command not found`；exit code 取的是 `tee` 的返回值而非实际命令。
-  - 解决：(1) 用 base64 编码将脚本写入远程临时文件，彻底避免 tmux 命令中的引号冲突；(2) 修复 codex 命令格式为 stdin 管道（`printf "%s" "$PROMPT" | codex ... -`）；(3) 在容器内 source nvm 解决 CLI 工具 PATH 问题；(4) 对 `docker exec bash -c "..."` 的参数转义 `$` → `\$`、`"` → `\"`，防止外层 bash 提前展开变量；(5) 用 `${PIPESTATUS[0]}` 正确捕获管道首命令的退出码；(6) 新增 `ssh_utils.py` 集中管理 SSH 连接参数构建。
-  - 避免复发：SSH+Container 的双层 shell（外层脚本 + docker exec bash -c）中，所有需在容器内展开的 `$var` 和 `$(...)` 都必须转义；提示文本等动态内容通过 base64 传递避免注入。
-  - Commit: `8c91ebc`
+* **异步 SQLAlchemy 中，commit 后不要依赖 ORM 实例状态**；返回值与清理逻辑应使用“快照值/重新查询”。
+* **流式接口禁止长期占用 DB session**，尤其在 SQLite 下会放大锁冲突。
+* **SQLite 并发默认启用 WAL + busy_timeout**，事务边界要显式可控。
+* **时间比较前必须统一时区归一化**，不能假设数据库读出来的 datetime 自带 tzinfo。
 
-* **SSH+Codex 三重修复（2026-02-25）**：
-  - Bug1(P0): `_start_ssh_task` 未提取并传递 `task.model`，导致 `_run_ssh_task` 的 codex 命令没有 `--model` 参数；codex 无模型时尝试从 API 刷新模型列表，遇到超时后失败。修复：从 `task.model` 提取 `model_name`，通过 `_run_ssh_task(model=...)` 传递，命令中始终带 `--model`，无则 fallback 为 `gpt-5.1-codex`。
-  - Bug2(P0): SSH 命令使用 `--ask-for-approval never`，该参数在 codex ≥0.100 版本已被移除；正确参数为 `--dangerously-bypass-approvals-and-sandbox`（同时跳过确认和沙箱限制，适合 SSH/CI 自动化）。
-  - Bug3(P0): 远程机器无法直连 `chatgpt.com`（codex API 端点），需通过代理访问。`.bashrc` 里的 `setproxy` alias 在非交互 shell 中不生效；修复：在 `_nvm_preamble` 中加入 `[ -f ~/proxy.sh ] && source ~/proxy.sh 2>/dev/null;`，对无该文件的机器无副作用。
-  - 验证：任务创建 → TODO → RUNNING → TO_BE_REVIEW 全流程在 SSH workspace 上通过测试。
-  - 避免复发：SSH 任务命令需与远程机器实际安装的 CLI 版本保持一致；新机器接入时先检查代理配置是否在非交互 shell 中也生效。
+---
 
-* **SSH 任务日志无输出修复（2026-02-25）**：
-  - 问题：SSH 工作区任务一直处于 RUNNING 状态，前端没有任何日志输出。
-  - 根因1：脚本用 `| tee {log_file}` 写日志，`tee` 对文件写入使用 stdio 块缓冲（4-8KB），日志文件不会实时更新，`tail -f` 看不到任何内容。
-  - 根因2：`tail -f`（小写f）在日志文件尚未创建时立即退出并报错，存在竞态条件（tmux session 启动有延迟）。
-  - 解决：(1) 将 `| tee {log_file}` 改为 `> {log_file} 2>&1` 直接重定向，彻底消除缓冲问题；(2) 将 `tail -f` 改为 `tail -F`（大写F），文件不存在时自动重试等待，解决竞态。
-  - 避免复发：SSH 远程管道中 `tee` 写文件是块缓冲，不适合实时日志场景；`tail -f` 不处理文件不存在的情况，`tail -F` 是更健壮的选择。
+### 4) 任务生命周期 / Merge / Retry 语义加固（2026-02-20 ~ 2026-02-24）
 
-* **任务完成全局通知扩展（dba1e2d，2026-02-24）**：
-  - 问题：当前前端仅在任务进入 `TO_BE_REVIEW` 时弹窗，任务执行后若直接失败或已完成，用户切到其他浏览器标签页时容易错过状态变化。
-  - 解决：扩展 `frontend/components/ToBeReviewNotifier.tsx` 为“任务完成通知器”，在任务从非终态进入 `TO_BE_REVIEW/DONE/FAILED` 时触发系统通知；同步更新 `settings` 文案为“Notify when task run completes”；通知配置工具改为 completion 语义并保留旧 key/事件导出兼容。
-  - 避免复发：全局提醒逻辑应按“终态集合”建模，不应绑定单一状态；涉及配置项重命名时保留向后兼容导出，避免用户本地设置失效。
-  - Commit: `dba1e2d`
+围绕任务状态机与 Git worktree 流程做了多轮加固：
+
+* Retry 语义改为**原任务原地重排队**（不新建任务、不新建 worktree）
+* Merge 流程增强：自动恢复残留 merge 状态、处理脏工作区、worktree 缺失时按分支继续合并、AI 兜底后按 Git 实际状态判定
+* 新增 `mark-done` 显式完结接口，避免 reconciler 自动推进审批语义
+* 增强 worktree 有效性校验与自动修复（路径存在 ≠ 可复用）
+
+**关键教训**
+
+* **“重试”优先定义为状态机流转，而不是复制实体**（避免上下文割裂）。
+* **Reconciler 只能修引用/一致性，不能替代用户审批语义**（不能自动把 `TO_BE_REVIEW` 推成 `DONE`）。
+* **Merge 必须遵循“规则优先、AI 兜底、最终以 Git 真实状态为准”**。
+* **路径存在不代表 worktree 有效**，所有复用前都要做 Git 级校验。
+
+---
+
+### 5) 平台兼容性与执行器鲁棒性（Windows / CLI / 长文本 / 日志）
+
+完成多项平台与执行链路修复：
+
+* Windows shell 优先级统一（git-bash > cmd > powershell）并集中在 `cli_resolver`
+* Windows CLI 可执行文件解析修复（避免 PowerShell alias/路径导致 WinError2）
+* 长 prompt 改为 stdin 传递（避免命令行长度限制）
+* 子进程日志读取增大 `readline` 上限（修复超长单行导致 `LimitOverrunError`）
+* SSE 日志多行解析修复
+
+**关键教训**
+
+* **大文本输入统一走 stdin/文件通道**，不要依赖命令行参数长度上限。
+* **Windows shell 选择必须走单一策略入口**，禁止各适配器各自实现。
+* **流式日志协议要按“多行/超长行”设计**，不能假设每条事件只有单行且很短。
+
+---
+
+### 6) 通知、可观察性与产品体验
+
+围绕任务完成与待审核的可见性做了持续改进：
+
+* 全局通知器从仅 `TO_BE_REVIEW` 扩展到终态集合（`TO_BE_REVIEW / DONE / FAILED`）
+* 修复首次观测即终态时漏报问题
+* 新增通知开关并接入运行态监听
+* Retry/完成类操作增加即时 UI 反馈，减少“点击后无感知”
+
+**关键教训**
+
+* **提醒逻辑应按“终态集合”建模，而不是绑死单一状态**。
+* **状态变化通知要覆盖“首次观测态”**，不能只依赖前后态对比。
+* **触发后台动作的按钮必须给即时反馈**（toast/提示条/loading 文案）。
+
+---
+
+### 7) 工程化与交付（CI/CD、回归测试、分支协作）
+
+建立 CI/CD 基线并补齐关键回归验证：
+
+* GitHub CI 覆盖后端/前端构建与基础回归
+* main 分支自动生成交付产物
+* 多个高风险路径增加回归脚本（重试、merge、mark-done、数据库稳定性等）
+* 多次并行分支合并暴露 `PROGRESS.md` 文本冲突问题，流程上加强 rebase/拆分条目习惯
+
+**关键教训**
+
+* **状态机/调度/合并路径的改动必须配套回归测试**（尤其是“返回码与最终状态一致性”）。
+* **新增 backend / 适配器能力要从单一枚举源派生，避免字符串散落导致能力不一致**。
+* **并行分支频繁修改同一沉淀文档时，先 rebase 或拆分条目，降低冲突概率**。
+* **合并策略应依赖 CI 必过检查，不绕过质量闸门**。
+
+---
+
+## 最值得保留的“总教训”（可放在文末）
+
+1. **统一入口比局部修补更重要**
+   SSH 连接参数、Windows shell 选择、CLI 执行策略、路径解析都必须集中管理，否则同类 bug 会反复出现。
+
+2. **状态机语义要清晰，自动化边界要克制**
+   Retry 是原地重试；Reconciler 只修一致性，不推进审批；任务完结必须是显式用户动作（merge 或 mark-done）。
+
+3. **异步 + SQLite 的稳定性核心在“短会话、显式事务、避免 post-commit ORM 访问”**
+   流式接口尤其要避免持有长事务；commit 后使用快照/重查，不依赖 ORM 对象状态。
+
+4. **跨环境执行（SSH / 容器 / Windows / 非交互 shell）是高风险区，必须优先做防御性设计**
+   显式 source、统一转义、stdin 传大文本、代理配置兼容、日志链路实时性都要预先考虑。
+
+5. **关键链路改动必须有回归测试与 CI 兜底**
+   特别是 merge/retry/mark-done/scheduler/DB 稳定性路径，单点修复很容易引入新的状态机回归。
+
