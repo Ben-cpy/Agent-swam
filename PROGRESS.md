@@ -1,3 +1,14 @@
+* **六大功能迭代（2026-02-25）**：
+  - 功能1：Workspace 名称修改 - WorkspaceManager 增加内联铅笔编辑，调用已有 PATCH API。
+  - 功能2：GPU 显示修复 - 进度条改为显示显存利用率(%)，文字同时显示显存占比和 compute 利用率，解决 "0%" 恒定问题。
+  - 功能3：多 GPU 支持 - Workspace 增加 gpu_indices 字段，board 页面显示可点击 GPU 按钮，executor 自动设置 CUDA_VISIBLE_DEVICES 环境变量传给 adapter subprocess。
+  - 功能4：任务完成通知 - 新增 InAppToast 组件（固定右下角），浏览器权限被拒时仍能显示页内 toast；ToBeReviewNotifier 同时触发 browser notification 和 in-app toast。
+  - 功能5：Workspace 备忘录 - Workspace 增加 notes(Text)字段，新增 WorkspaceNotes 组件（半宽，自动保存），位于 GPU/MEM 下方、任务看板上方。
+  - 功能6：任务编号工作区内独立计数 - get_next_task_number 由 MAX(task.id) 改为 COUNT(task.id)，使编号从1开始在工作区内独立递增。
+  - DB 迁移：init_db() 中通过 safe ALTER TABLE 添加 gpu_indices 和 notes 列，不影响已有数据。
+  - 所有 7 个集成测试通过，前端 TypeScript 构建通过（同时修复 MentionTextarea.tsx 预存在 TS 错误）。
+  - Commit: `ba55ee5`
+
 * **SSH_CONTAINER + zsh 支持，修复多个关键bug（2026-02-24）**：
   - Bug1：`SSH_CONTAINER`分支硬编码bash，忽略`login_shell`设置；修复：增加`if _shell == "zsh"`分支用`docker exec ... zsh --login -c`。
   - Bug2：`create_workspace`端点未保存`login_shell`字段（漏写）；修复：`Workspace(..., login_shell=workspace.login_shell)`。
