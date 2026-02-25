@@ -8,8 +8,9 @@ from .cli_resolver import build_windows_command_variants
 class BackendAdapter(ABC):
     """Abstract base class for AI backend adapters"""
 
-    def __init__(self, workspace_path: str):
+    def __init__(self, workspace_path: str, extra_env: Optional[dict] = None):
         self.workspace_path = workspace_path
+        self.extra_env: Optional[dict] = extra_env
         self._usage_data: Optional[dict] = None
         self._is_quota_error: bool = False
 

@@ -8,8 +8,14 @@ import os
 class ClaudeCodeAdapter(BackendAdapter):
     """Adapter for Claude Code CLI"""
 
-    def __init__(self, workspace_path: str, model: Optional[str] = None, permission_mode: Optional[str] = None):
-        super().__init__(workspace_path)
+    def __init__(
+        self,
+        workspace_path: str,
+        model: Optional[str] = None,
+        permission_mode: Optional[str] = None,
+        extra_env: Optional[dict] = None,
+    ):
+        super().__init__(workspace_path, extra_env=extra_env)
         self.model = model
         self.permission_mode = permission_mode
 
@@ -63,6 +69,8 @@ class ClaudeCodeAdapter(BackendAdapter):
         if "CLAUDECODE" in env:
             del env["CLAUDECODE"]
         env = apply_windows_env_overrides(env, cli_name="claude")
+        if self.extra_env:
+            env.update(self.extra_env)
 
         exit_code = 0
 

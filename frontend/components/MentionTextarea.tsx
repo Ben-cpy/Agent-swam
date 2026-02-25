@@ -99,7 +99,7 @@ function useDebounce<Args extends unknown[]>(
   fn: (...args: Args) => void,
   delay: number,
 ): (...args: Args) => void {
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   return useCallback(
     (...args: Args) => {
       clearTimeout(timerRef.current);

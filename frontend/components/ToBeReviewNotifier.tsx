@@ -9,6 +9,7 @@ import {
   TASK_COMPLETION_NOTIFICATION_ENABLED_KEY,
   TASK_COMPLETION_NOTIFICATION_SETTING_EVENT,
 } from '@/lib/reviewNotificationSettings';
+import { pushInAppToast } from '@/components/InAppToast';
 
 const NOTIFICATION_PERMISSION_KEY = 'task_completion_notification_permission_requested_v1';
 const POLL_INTERVAL_MS = 2000;
@@ -49,6 +50,17 @@ function getNotificationBody(task: Task): string {
 }
 
 function showCompletionNotification(task: Task) {
+  // Always fire in-app toast regardless of browser notification permission
+  pushInAppToast({
+    title: getNotificationTitle(task),
+    body: getNotificationBody(task),
+    type: task.status === TaskStatus.FAILED ? 'error' : 'success',
+    taskId: task.id,
+  });
+
+  // Also fire browser notification if permission is granted
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
   const notification = new Notification(getNotificationTitle(task), {
     body: getNotificationBody(task),
     tag: `task-completion-${task.id}`,
@@ -134,20 +146,9 @@ export default function TaskCompletionNotifier() {
       return !isCompletionStatus(previousStatus);
     });
 
-    if (transitionedTasks.length > 0 && 'Notification' in window) {
+    if (transitionedTasks.length > 0) {
       transitionedTasks.forEach((task) => {
-        if (Notification.permission === 'granted') {
-          showCompletionNotification(task);
-          return;
-        }
-
-        if (Notification.permission === 'default') {
-          void Notification.requestPermission().then((permission) => {
-            if (permission === 'granted') {
-              showCompletionNotification(task);
-            }
-          });
-        }
+        showCompletionNotification(task);
       });
     }
 
