@@ -71,12 +71,16 @@ class WorkspaceUpdate(BaseModel):
     display_name: Optional[str] = Field(None, max_length=200)
     login_shell: Optional[str] = Field(None, max_length=50)
     concurrency_limit: Optional[int] = Field(None, ge=1, le=20)
+    gpu_indices: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
 
 
 class WorkspaceResponse(WorkspaceBase):
     workspace_id: int
     runner_id: int
     concurrency_limit: int
+    gpu_indices: Optional[str] = None
+    notes: Optional[str] = None
 
     class Config:
         orm_mode = True

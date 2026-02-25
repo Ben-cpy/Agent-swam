@@ -194,11 +194,11 @@ async def get_next_task_number(
     if not workspace:
         raise HTTPException(status_code=400, detail="Workspace not found")
 
-    max_id_result = await db.execute(
-        select(func.max(Task.id)).where(Task.workspace_id == workspace_id)
+    count_result = await db.execute(
+        select(func.count(Task.id)).where(Task.workspace_id == workspace_id)
     )
-    max_id = max_id_result.scalar() or 0
-    next_number = max_id + 1
+    task_count = count_result.scalar() or 0
+    next_number = task_count + 1
 
     return NextTaskNumberResponse(
         next_number=next_number,

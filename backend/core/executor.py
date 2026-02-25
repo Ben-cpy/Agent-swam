@@ -367,6 +367,8 @@ class TaskExecutor:
             model_name,
         )
 
+        gpu_indices = getattr(workspace, "gpu_indices", None)
+
         asyncio.create_task(
             self._run_ssh_task(
                 task_id=task_pk,
@@ -383,6 +385,7 @@ class TaskExecutor:
                 tmux_session=tmux_session_name,
                 permission_mode=permission_mode,
                 login_shell=login_shell,
+                gpu_indices=gpu_indices,
             )
         )
         return True
@@ -454,6 +457,10 @@ class TaskExecutor:
             task_worktree_path,
         )
 
+        extra_env = {}
+        if workspace.gpu_indices:
+            extra_env["CUDA_VISIBLE_DEVICES"] = workspace.gpu_indices
+
         asyncio.create_task(
             self._run_task(
                 task_id=task_pk,
@@ -463,6 +470,7 @@ class TaskExecutor:
                 prompt=prompt_text,
                 model=model_name,
                 permission_mode=permission_mode,
+                extra_env=extra_env or None,
             )
         )
         return True
@@ -476,14 +484,15 @@ class TaskExecutor:
         prompt: str,
         model: Optional[str] = None,
         permission_mode: Optional[str] = None,
+        extra_env: Optional[dict] = None,
     ):
         try:
             if backend == "claude_code":
-                adapter = ClaudeCodeAdapter(workspace_path, model=model, permission_mode=permission_mode)
+                adapter = ClaudeCodeAdapter(workspace_path, model=model, permission_mode=permission_mode, extra_env=extra_env)
             elif backend == "codex_cli":
-                adapter = CodexAdapter(workspace_path, model=model)
+                adapter = CodexAdapter(workspace_path, model=model, extra_env=extra_env)
             elif backend == "copilot_cli":
-                adapter = CopilotAdapter(workspace_path, model=model)
+                adapter = CopilotAdapter(workspace_path, model=model, extra_env=extra_env)
             else:
                 raise ValueError(f"Unknown backend: {backend}")
 
@@ -563,6 +572,7 @@ class TaskExecutor:
         model: Optional[str] = None,
         permission_mode: Optional[str] = None,
         login_shell: str = "bash",
+        gpu_indices: Optional[str] = None,
     ):
         """Run a task on a remote SSH host using tmux for session persistence.
 
@@ -615,6 +625,10 @@ class TaskExecutor:
                 ai_cmd = f'copilot --allow-all --no-color --no-alt-screen -p "${_var}"'
             else:
                 raise ValueError(f"Unknown backend: {backend}")
+
+            # Prefix GPU selection if configured for this workspace
+            if gpu_indices:
+                ai_cmd = f"CUDA_VISIBLE_DEVICES={shlex.quote(gpu_indices)} {ai_cmd}"
 
             # Validate login_shell to a known safe value
             _shell = login_shell if login_shell in ("bash", "zsh", "sh") else "bash"

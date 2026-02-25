@@ -141,7 +141,7 @@ async def update_workspace(
     payload: WorkspaceUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    """Partially update a workspace (display_name, login_shell, concurrency_limit)."""
+    """Partially update a workspace (display_name, login_shell, concurrency_limit, gpu_indices, notes)."""
     ws_result = await db.execute(select(Workspace).where(Workspace.workspace_id == workspace_id))
     workspace = ws_result.scalar_one_or_none()
     if not workspace:
@@ -155,6 +155,10 @@ async def update_workspace(
         workspace.login_shell = payload.login_shell
     if payload.concurrency_limit is not None:
         workspace.concurrency_limit = payload.concurrency_limit
+    if payload.gpu_indices is not None:
+        workspace.gpu_indices = payload.gpu_indices if payload.gpu_indices.strip() else None
+    if payload.notes is not None:
+        workspace.notes = payload.notes
 
     await db.commit()
     await db.refresh(workspace)

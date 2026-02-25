@@ -92,6 +92,8 @@ class Workspace(Base):
     login_shell = Column(String(50), default="bash", nullable=False)
     runner_id = Column(Integer, ForeignKey("runners.runner_id"), nullable=False)
     concurrency_limit = Column(Integer, default=3, nullable=False)
+    gpu_indices = Column(String(100), nullable=True)
+    notes = Column(Text, nullable=True)
 
     # Relationships
     runner = relationship("Runner", back_populates="workspaces")

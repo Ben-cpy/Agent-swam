@@ -11,8 +11,9 @@ class CopilotAdapter(BackendAdapter):
         self,
         workspace_path: str,
         model: Optional[str] = None,
+        extra_env: Optional[dict] = None,
     ):
-        super().__init__(workspace_path)
+        super().__init__(workspace_path, extra_env=extra_env)
         self.model = model
 
     def build_command(self, prompt: str) -> list[str]:
@@ -50,7 +51,12 @@ class CopilotAdapter(BackendAdapter):
             return
 
         exit_code = 0
+        import os
         env = apply_windows_env_overrides(cli_name="copilot")
+        if env and self.extra_env:
+            env.update(self.extra_env)
+        elif self.extra_env:
+            env = {**os.environ.copy(), **self.extra_env}
 
         async for line, code in self.run_subprocess(
             cmd,

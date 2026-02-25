@@ -70,6 +70,8 @@ export interface Workspace {
   login_shell?: string | null;
   runner_id: number;
   concurrency_limit: number;
+  gpu_indices?: string | null;
+  notes?: string | null;
 }
 
 export interface WorkspaceCreateInput {
@@ -82,6 +84,14 @@ export interface WorkspaceCreateInput {
   container_name?: string;
   login_shell?: string;
   runner_id?: number;
+}
+
+export interface WorkspaceUpdateInput {
+  display_name?: string;
+  login_shell?: string;
+  concurrency_limit?: number;
+  gpu_indices?: string;
+  notes?: string;
 }
 
 export interface Run {

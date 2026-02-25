@@ -2,6 +2,7 @@ from typing import AsyncIterator, Optional, Callable, Awaitable, Union
 from .base import BackendAdapter
 from .cli_resolver import apply_windows_env_overrides, build_windows_env_overrides, resolve_cli
 import json
+import os
 
 
 class CodexAdapter(BackendAdapter):
@@ -12,8 +13,9 @@ class CodexAdapter(BackendAdapter):
         workspace_path: str,
         model: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
+        extra_env: Optional[dict] = None,
     ):
-        super().__init__(workspace_path)
+        super().__init__(workspace_path, extra_env=extra_env)
         self.model = model
         self.reasoning_effort = reasoning_effort
 
@@ -70,6 +72,10 @@ class CodexAdapter(BackendAdapter):
 
         exit_code = 0
         env = apply_windows_env_overrides(cli_name="codex")
+        if env and self.extra_env:
+            env.update(self.extra_env)
+        elif self.extra_env:
+            env = {**os.environ.copy(), **self.extra_env}
 
         async for line, code in self.run_subprocess(
             cmd,

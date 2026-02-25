@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import axios from 'axios';
 import useSWR from 'swr';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Pencil, Check, X } from 'lucide-react';
 import { workspaceAPI } from '@/lib/api';
 import { ApiErrorBody, Workspace, WorkspaceCreateInput, WorkspaceType } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -62,6 +62,8 @@ export default function WorkspaceManager() {
   const [form, setForm] = useState<FormState>(initialForm);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   const {
     data: wsData,
@@ -92,6 +94,29 @@ export default function WorkspaceManager() {
       container_name: workspaceType === WorkspaceType.SSH_CONTAINER ? prev.container_name : '',
       port: workspaceType === WorkspaceType.LOCAL ? '22' : prev.port || '22',
     }));
+  };
+
+  const startRename = (ws: Workspace) => {
+    setRenamingId(ws.workspace_id);
+    setRenameValue(ws.display_name);
+  };
+
+  const cancelRename = () => {
+    setRenamingId(null);
+    setRenameValue('');
+  };
+
+  const confirmRename = async (workspaceId: number) => {
+    const name = renameValue.trim();
+    if (!name) return;
+    try {
+      await workspaceAPI.update(workspaceId, { display_name: name });
+      await mutateWorkspaces();
+    } catch {
+      alert('Failed to rename workspace');
+    } finally {
+      cancelRename();
+    }
   };
 
   const handleDeleteWorkspace = async (workspaceId: number, name: string) => {
@@ -297,15 +322,47 @@ export default function WorkspaceManager() {
           {workspaces.map((ws) => (
             <div key={ws.workspace_id} className="border rounded-lg p-4 space-y-2">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 min-w-0">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
                   <WorkspaceHealthBadge
                     workspaceId={ws.workspace_id}
                     workspaceType={ws.workspace_type}
                   />
-                  <span className="font-medium truncate">{ws.display_name}</span>
+                  {renamingId === ws.workspace_id ? (
+                    <div className="flex items-center gap-1 flex-1">
+                      <Input
+                        className="h-7 text-sm flex-1"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') confirmRename(ws.workspace_id);
+                          if (e.key === 'Escape') cancelRename();
+                        }}
+                        autoFocus
+                      />
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-green-600" onClick={() => confirmRename(ws.workspace_id)}>
+                        <Check className="w-4 h-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={cancelRename}>
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <span className="font-medium truncate">{ws.display_name}</span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <Badge variant="outline">{getWorkspaceTypeLabel(ws.workspace_type)}</Badge>
+                  {renamingId !== ws.workspace_id && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => startRename(ws)}
+                      title="Rename workspace"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon"

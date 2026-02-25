@@ -6,6 +6,7 @@ import { taskAPI, workspaceAPI } from '@/lib/api';
 import TaskBoard from '@/components/TaskBoard';
 import WorkspaceResources from '@/components/WorkspaceResources';
 import WorkspaceHealthBadge from '@/components/WorkspaceHealthBadge';
+import WorkspaceNotes from '@/components/WorkspaceNotes';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,12 +23,21 @@ export default function WorkspaceBoardPage() {
   const router = useRouter();
   const workspaceId = parseInt(params.id as string, 10);
 
-  const { data: wsData } = useSWR(
+  const { data: wsData, mutate: mutateWorkspace } = useSWR(
     '/workspaces',
     () => workspaceAPI.list(),
     { revalidateOnFocus: false }
   );
   const workspace = wsData?.data.find((w) => w.workspace_id === workspaceId) ?? null;
+
+  const handleGpuIndicesChange = async (indices: string) => {
+    try {
+      await workspaceAPI.update(workspaceId, { gpu_indices: indices });
+      await mutateWorkspace();
+    } catch {
+      // silently ignore - the UI will revert on next load
+    }
+  };
 
   const { data, error, isLoading, mutate } = useSWR(
     `/tasks?workspace_id=${workspaceId}`,
@@ -83,7 +93,13 @@ export default function WorkspaceBoardPage() {
         </Link>
       </div>
 
-      <WorkspaceResources workspaceId={workspaceId} />
+      <WorkspaceResources
+        workspaceId={workspaceId}
+        gpuIndices={workspace?.gpu_indices}
+        onGpuIndicesChange={handleGpuIndicesChange}
+      />
+
+      <WorkspaceNotes workspaceId={workspaceId} initialNotes={workspace?.notes ?? null} />
 
       {isLoading && tasks.length === 0 && (
         <div className="text-center py-12">
