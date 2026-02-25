@@ -351,18 +351,20 @@ class TaskExecutor:
         run_id = run.run_id
         backend_value = task.backend.value
         prompt_text = task.prompt
+        model_name = task.model
         permission_mode = task.permission_mode
         worktree_remote_path = task.worktree_path or remote_path
         task_pk = task.id
         await db.commit()
 
         logger.info(
-            "Starting SSH task %s on host %s (port=%s) in tmux session %s, worktree=%s",
+            "Starting SSH task %s on host %s (port=%s) in tmux session %s, worktree=%s, model=%s",
             task_id,
             ssh_host,
             ssh_port,
             tmux_session_name,
             worktree_remote_path,
+            model_name,
         )
 
         asyncio.create_task(
@@ -377,6 +379,7 @@ class TaskExecutor:
                 remote_path=worktree_remote_path,
                 backend=backend_value,
                 prompt=prompt_text,
+                model=model_name,
                 tmux_session=tmux_session_name,
                 permission_mode=permission_mode,
                 login_shell=login_shell,
@@ -557,6 +560,7 @@ class TaskExecutor:
         backend: str,
         prompt: str,
         tmux_session: str,
+        model: Optional[str] = None,
         permission_mode: Optional[str] = None,
         login_shell: str = "bash",
     ):
@@ -596,10 +600,16 @@ class TaskExecutor:
                     perm_flag = "--permission-mode dontAsk"
                 ai_cmd = f'claude -p --output-format stream-json {perm_flag} "${_var}"'
             elif backend == "codex_cli":
+                # Always pass --model to prevent codex from attempting to refresh model list
+                # (which times out when no model is pre-selected).
+                # Use --dangerously-bypass-approvals-and-sandbox for non-interactive execution;
+                # this is the correct flag in codex >=0.100 (replaces --ask-for-approval never).
+                _effective_model = model or "gpt-5.1-codex"
                 ai_cmd = (
                     f'printf "%s" "${_var}" | '
-                    f"codex --ask-for-approval never exec --json --sandbox danger-full-access "
-                    f"--cd {shlex.quote(remote_path)} -"
+                    f"codex exec --json --dangerously-bypass-approvals-and-sandbox "
+                    f"-m {shlex.quote(_effective_model)} "
+                    f"-C {shlex.quote(remote_path)} -"
                 )
             elif backend == "copilot_cli":
                 ai_cmd = f'copilot --allow-all --no-color --no-alt-screen -p "${_var}"'
@@ -609,10 +619,13 @@ class TaskExecutor:
             # Validate login_shell to a known safe value
             _shell = login_shell if login_shell in ("bash", "zsh", "sh") else "bash"
 
-            # NVM loader used by all paths
+            # NVM loader + proxy loader used by all paths.
+            # Source ~/proxy.sh if it exists so outbound requests work on machines
+            # that require a proxy (common in corporate/lab environments).
             _nvm_preamble = (
                 "source /root/.nvm/nvm.sh 2>/dev/null; "
                 "source ~/.nvm/nvm.sh 2>/dev/null; "
+                "[ -f ~/proxy.sh ] && source ~/proxy.sh 2>/dev/null; "
             )
 
             # Build the full command that runs inside the target environment.
@@ -677,15 +690,14 @@ class TaskExecutor:
                 )
                 exec_cmd = f"{shell_preamble}cd {shlex.quote(remote_path)} && {ai_cmd}"
 
-            # Write the full pipeline to a shell script file using base64 to avoid quoting hell.
-            # The script content may contain arbitrary characters (single quotes, etc.) that would
-            # break shell quoting if passed directly. Base64 encoding ensures safe transfer.
-            # Use PIPESTATUS[0] to capture the exit code of the actual command, not tee.
-            # The outer wrapper always uses bash (required for PIPESTATUS array syntax).
+            # Write the script to the remote host using base64 to avoid quoting issues.
+            # Use direct redirect (>) instead of tee to avoid stdio block-buffering on the log file.
+            # tee uses 4-8KB block buffering for file writes, causing tail -f to see no output
+            # until the buffer fills. Direct redirect lets the OS write syscalls go straight through.
             script_content = (
                 f"#!/bin/bash\n"
-                f"({exec_cmd}) 2>&1 | tee {shlex.quote(log_file)}\n"
-                f"echo EXIT_CODE:${{PIPESTATUS[0]}} >> {shlex.quote(log_file)}\n"
+                f"({exec_cmd}) > {shlex.quote(log_file)} 2>&1\n"
+                f"echo EXIT_CODE:$? >> {shlex.quote(log_file)}\n"
             )
             encoded_script = base64.b64encode(script_content.encode()).decode()
 
@@ -709,9 +721,11 @@ class TaskExecutor:
 
             logger.info("SSH tmux session %s started on %s:%s", tmux_session, ssh_host, ssh_port)
 
-            # Stream the log file from the remote host via tail -f
+            # Stream the log file from the remote host.
+            # Use tail -F (capital F) which retries if the file doesn't exist yet,
+            # avoiding the race condition where the tmux session hasn't created the file yet.
             tail_proc = await asyncio.create_subprocess_exec(
-                "ssh", *ssh_args, f"tail -f {shlex.quote(log_file)}",
+                "ssh", *ssh_args, f"tail -F {shlex.quote(log_file)}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

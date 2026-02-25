@@ -191,6 +191,20 @@
   - 避免复发：SSH+Container 的双层 shell（外层脚本 + docker exec bash -c）中，所有需在容器内展开的 `$var` 和 `$(...)` 都必须转义；提示文本等动态内容通过 base64 传递避免注入。
   - Commit: `8c91ebc`
 
+* **SSH+Codex 三重修复（2026-02-25）**：
+  - Bug1(P0): `_start_ssh_task` 未提取并传递 `task.model`，导致 `_run_ssh_task` 的 codex 命令没有 `--model` 参数；codex 无模型时尝试从 API 刷新模型列表，遇到超时后失败。修复：从 `task.model` 提取 `model_name`，通过 `_run_ssh_task(model=...)` 传递，命令中始终带 `--model`，无则 fallback 为 `gpt-5.1-codex`。
+  - Bug2(P0): SSH 命令使用 `--ask-for-approval never`，该参数在 codex ≥0.100 版本已被移除；正确参数为 `--dangerously-bypass-approvals-and-sandbox`（同时跳过确认和沙箱限制，适合 SSH/CI 自动化）。
+  - Bug3(P0): 远程机器无法直连 `chatgpt.com`（codex API 端点），需通过代理访问。`.bashrc` 里的 `setproxy` alias 在非交互 shell 中不生效；修复：在 `_nvm_preamble` 中加入 `[ -f ~/proxy.sh ] && source ~/proxy.sh 2>/dev/null;`，对无该文件的机器无副作用。
+  - 验证：任务创建 → TODO → RUNNING → TO_BE_REVIEW 全流程在 SSH workspace 上通过测试。
+  - 避免复发：SSH 任务命令需与远程机器实际安装的 CLI 版本保持一致；新机器接入时先检查代理配置是否在非交互 shell 中也生效。
+
+* **SSH 任务日志无输出修复（2026-02-25）**：
+  - 问题：SSH 工作区任务一直处于 RUNNING 状态，前端没有任何日志输出。
+  - 根因1：脚本用 `| tee {log_file}` 写日志，`tee` 对文件写入使用 stdio 块缓冲（4-8KB），日志文件不会实时更新，`tail -f` 看不到任何内容。
+  - 根因2：`tail -f`（小写f）在日志文件尚未创建时立即退出并报错，存在竞态条件（tmux session 启动有延迟）。
+  - 解决：(1) 将 `| tee {log_file}` 改为 `> {log_file} 2>&1` 直接重定向，彻底消除缓冲问题；(2) 将 `tail -f` 改为 `tail -F`（大写F），文件不存在时自动重试等待，解决竞态。
+  - 避免复发：SSH 远程管道中 `tee` 写文件是块缓冲，不适合实时日志场景；`tail -f` 不处理文件不存在的情况，`tail -F` 是更健壮的选择。
+
 * **任务完成全局通知扩展（dba1e2d，2026-02-24）**：
   - 问题：当前前端仅在任务进入 `TO_BE_REVIEW` 时弹窗，任务执行后若直接失败或已完成，用户切到其他浏览器标签页时容易错过状态变化。
   - 解决：扩展 `frontend/components/ToBeReviewNotifier.tsx` 为“任务完成通知器”，在任务从非终态进入 `TO_BE_REVIEW/DONE/FAILED` 时触发系统通知；同步更新 `settings` 文案为“Notify when task run completes”；通知配置工具改为 completion 语义并保留旧 key/事件导出兼容。
