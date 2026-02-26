@@ -142,7 +142,10 @@ export default function TaskCompletionNotifier() {
     const transitionedTasks = tasks.filter((task) => {
       const previousStatus = previousMap.get(task.id);
       if (!isCompletionStatus(task.status)) return false;
-      if (previousStatus == null) return true;
+      // Only show notification if task transitioned FROM non-completion TO completion
+      // If previousStatus is null, it means this is a new task we haven't seen,
+      // but we should only notify if it's newly completing
+      if (previousStatus == null) return false;
       return !isCompletionStatus(previousStatus);
     });
 
